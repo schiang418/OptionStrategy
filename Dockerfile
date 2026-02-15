@@ -1,22 +1,26 @@
-FROM node:20-slim
+# Use Node.js base image (matching OptionScope)
+FROM node:22-slim
 
-# Install Chromium, ChromeDriver, Python3, and Selenium
+# Install system dependencies required for Playwright
 RUN apt-get update && apt-get install -y \
-    chromium \
-    chromium-driver \
-    python3 \
-    python3-pip \
-    fonts-liberation \
-    ca-certificates \
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libdbus-1-3 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libasound2 \
+    libatspi2.0-0 \
+    libxshmfence1 \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
-
-# Install Selenium for Python
-RUN pip3 install selenium --break-system-packages
-
-# Set Chromium paths
-ENV PUPPETEER_SKIP_DOWNLOAD=true
-ENV CHROMIUM_PATH=/usr/bin/chromium
 
 WORKDIR /app
 
@@ -26,14 +30,14 @@ COPY package*.json ./
 # Install all dependencies (including dev for build)
 RUN npm ci 2>/dev/null || npm install
 
+# Install Playwright Chromium browser
+RUN npx playwright install chromium --with-deps
+
 # Copy source code
 COPY . .
 
 # Build frontend and server
 RUN npx vite build && npx tsc -p tsconfig.server.json
-
-# Copy Python automation scripts to where the compiled server expects them
-RUN cp -r automation dist/automation
 
 # Remove dev dependencies after build
 RUN npm prune --production 2>/dev/null || true

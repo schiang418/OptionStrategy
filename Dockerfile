@@ -32,6 +32,9 @@ COPY . .
 # Build frontend and server
 RUN npx vite build && npx tsc -p tsconfig.server.json
 
+# Copy Python automation scripts to where the compiled server expects them
+RUN cp -r automation dist/automation
+
 # Remove dev dependencies after build
 RUN npm prune --production 2>/dev/null || true
 

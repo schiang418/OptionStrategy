@@ -1,118 +1,156 @@
-import React, { useState, useEffect } from 'react';
-import { fetchScanResults, deleteScanData } from '../api';
+import React, { useState, useMemo } from 'react';
+import { Trash2 } from 'lucide-react';
+import { deleteScanData, type ScanResult } from '../api';
 
 interface ScanResultsPanelProps {
-  scanDates: Array<{ scanDate: string; scanName: string; resultCount: number }>;
+  results: ScanResult[];
+  scanDate: string;
   onDataChange: () => void;
 }
 
-export default function ScanResultsPanel({ scanDates, onDataChange }: ScanResultsPanelProps) {
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  const [results, setResults] = useState<any[]>([]);
-  const [loadingResults, setLoadingResults] = useState(false);
+type SortKey = 'ticker' | 'price' | 'returnPercent' | 'probMaxProfit' | 'daysToExp' | 'maxProfit';
 
-  useEffect(() => {
-    if (scanDates.length > 0 && !selectedDate) {
-      setSelectedDate(scanDates[0].scanDate);
+function returnBarColor(ret: number | null): string {
+  if (ret == null) return '#ef4444';
+  const pct = ret * 100;
+  if (pct >= 10) return '#22c55e';
+  if (pct >= 5) return '#4f8ff7';
+  if (pct >= 2) return '#eab308';
+  return '#ef4444';
+}
+
+export default function ScanResultsPanel({ results, scanDate, onDataChange }: ScanResultsPanelProps) {
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({
+    key: 'returnPercent',
+    dir: 'desc',
+  });
+
+  const sorted = useMemo(() => {
+    return [...results].sort((a, b) => {
+      const va = (a as any)[sort.key] ?? 0;
+      const vb = (b as any)[sort.key] ?? 0;
+      if (typeof va === 'string') {
+        return sort.dir === 'asc'
+          ? va.localeCompare(vb)
+          : vb.localeCompare(va);
+      }
+      return sort.dir === 'asc' ? va - vb : vb - va;
+    });
+  }, [results, sort]);
+
+  const handleSort = (key: SortKey) => {
+    if (sort.key === key) {
+      setSort({ key, dir: sort.dir === 'asc' ? 'desc' : 'asc' });
+    } else {
+      setSort({ key, dir: key === 'ticker' ? 'asc' : 'desc' });
     }
-  }, [scanDates, selectedDate]);
-
-  useEffect(() => {
-    if (!selectedDate) return;
-    setLoadingResults(true);
-    fetchScanResults(selectedDate)
-      .then(setResults)
-      .catch(() => setResults([]))
-      .finally(() => setLoadingResults(false));
-  }, [selectedDate]);
+  };
 
   async function handleDelete() {
-    if (!selectedDate) return;
-    if (!confirm(`Delete all scan data for ${selectedDate}? This also removes associated portfolios.`)) return;
+    if (!confirm(`Delete all scan data for ${scanDate}? This also removes associated portfolios.`)) return;
     try {
-      await deleteScanData(selectedDate);
-      setSelectedDate(null);
-      setResults([]);
+      await deleteScanData(scanDate);
       onDataChange();
     } catch (err: any) {
       alert(`Delete failed: ${err.message}`);
     }
   }
 
-  if (scanDates.length === 0) {
-    return (
-      <section className="bg-[#161822] rounded-lg p-6 border border-gray-800">
-        <h2 className="text-xl font-semibold mb-2">Scan Results</h2>
-        <p className="text-gray-400">No scan data yet. Run a scan to get started.</p>
-      </section>
-    );
-  }
+  const SortHeader = ({ label, sortKey, className }: { label: string; sortKey: SortKey; className?: string }) => (
+    <th
+      onClick={() => handleSort(sortKey)}
+      className={`px-3 py-3 text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide
+        cursor-pointer hover:text-[#4f8ff7] whitespace-nowrap border-b border-[#2a2e3a] select-none ${className || 'text-left'}`}
+    >
+      {label}
+      {sort.key === sortKey && (sort.dir === 'asc' ? ' \u25B2' : ' \u25BC')}
+    </th>
+  );
+
+  if (results.length === 0) return null;
 
   return (
-    <section className="bg-[#161822] rounded-lg p-6 border border-gray-800">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-semibold">Scan Results</h2>
-        <div className="flex items-center gap-3">
-          <select
-            value={selectedDate || ''}
-            onChange={e => setSelectedDate(e.target.value)}
-            className="bg-[#0f1117] border border-gray-700 rounded px-3 py-1.5 text-sm"
-          >
-            {scanDates.map(d => (
-              <option key={d.scanDate} value={d.scanDate}>
-                {d.scanDate} ({d.resultCount} results)
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={handleDelete}
-            className="px-3 py-1.5 bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded text-sm transition-colors"
-          >
-            Delete
-          </button>
-        </div>
+    <section className="mt-6">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-lg font-semibold">
+          Scan Results
+          <span className="text-sm text-[#8b8fa3] font-normal ml-2">
+            {results.length} options
+          </span>
+        </h2>
+        <button
+          onClick={handleDelete}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600/10 hover:bg-red-600/20
+            text-red-400 rounded-lg text-xs font-medium transition-all"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+          Delete Scan
+        </button>
       </div>
 
-      {loadingResults ? (
-        <p className="text-gray-400">Loading results...</p>
-      ) : results.length === 0 ? (
-        <p className="text-gray-400">No results for selected date.</p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-gray-400 border-b border-gray-700">
-                <th className="text-left py-2 px-2">Ticker</th>
-                <th className="text-left py-2 px-2">Price</th>
-                <th className="text-left py-2 px-2">IV Rank</th>
-                <th className="text-left py-2 px-2">Strike</th>
-                <th className="text-left py-2 px-2">Exp Date</th>
-                <th className="text-left py-2 px-2">DTE</th>
-                <th className="text-right py-2 px-2">Prob Profit</th>
-                <th className="text-right py-2 px-2">Max Profit</th>
-                <th className="text-right py-2 px-2">Max Loss</th>
-                <th className="text-right py-2 px-2">Return %</th>
-              </tr>
-            </thead>
-            <tbody>
-              {results.map((r: any) => (
-                <tr key={r.id} className="border-b border-gray-800 hover:bg-[#1a1c2e]">
-                  <td className="py-2 px-2 font-medium text-white">{r.ticker}</td>
-                  <td className="py-2 px-2">${r.price?.toFixed(2)}</td>
-                  <td className="py-2 px-2">{r.ivRank?.toFixed(1)}</td>
-                  <td className="py-2 px-2">{r.strike}</td>
-                  <td className="py-2 px-2">{r.expDate}</td>
-                  <td className="py-2 px-2">{r.daysToExp}</td>
-                  <td className="py-2 px-2 text-right">{r.probMaxProfit?.toFixed(1)}%</td>
-                  <td className="py-2 px-2 text-right text-green-400">${r.maxProfit?.toFixed(0)}</td>
-                  <td className="py-2 px-2 text-right text-red-400">${r.maxLoss?.toFixed(0)}</td>
-                  <td className="py-2 px-2 text-right font-medium">{r.returnPercent?.toFixed(2)}%</td>
+      <div className="overflow-x-auto rounded-xl border border-[#2a2e3a]">
+        <table className="w-full text-[13px] border-collapse">
+          <thead className="bg-[#1a1d27] sticky top-0 z-10">
+            <tr>
+              <SortHeader label="Ticker" sortKey="ticker" />
+              <SortHeader label="Price" sortKey="price" />
+              <th className="px-3 py-3 text-left text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide border-b border-[#2a2e3a]">
+                Strike
+              </th>
+              <th className="px-3 py-3 text-left text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide border-b border-[#2a2e3a]">
+                Exp Date
+              </th>
+              <SortHeader label="DTE" sortKey="daysToExp" />
+              <SortHeader label="Prob Profit" sortKey="probMaxProfit" className="text-right" />
+              <SortHeader label="Max Profit" sortKey="maxProfit" className="text-right" />
+              <th className="px-3 py-3 text-right text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide border-b border-[#2a2e3a]">
+                Max Loss
+              </th>
+              <SortHeader label="Return" sortKey="returnPercent" className="text-right" />
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((r) => {
+              const retPct = r.returnPercent != null ? (r.returnPercent * 100).toFixed(2) : '0.00';
+              const probPct = r.probMaxProfit != null ? (r.probMaxProfit * 100).toFixed(1) : '0.0';
+
+              return (
+                <tr
+                  key={r.id}
+                  className="cursor-default hover:bg-[#242836] transition-colors border-b border-[#2a2e3a]/50"
+                >
+                  <td className="px-3 py-2 font-bold font-mono">{r.ticker}</td>
+                  <td className="px-3 py-2">${r.price?.toFixed(2) ?? '-'}</td>
+                  <td className="px-3 py-2 font-mono text-[#8b8fa3]">{r.strike}</td>
+                  <td className="px-3 py-2">{r.expDate}</td>
+                  <td className="px-3 py-2">{r.daysToExp}</td>
+                  <td className="px-3 py-2 text-right">{probPct}%</td>
+                  <td className="px-3 py-2 text-right text-green-400">
+                    ${r.maxProfit?.toFixed(0) ?? '-'}
+                  </td>
+                  <td className="px-3 py-2 text-right text-red-400">
+                    ${r.maxLoss?.toFixed(0) ?? '-'}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      <span className="font-medium">{retPct}%</span>
+                      <div className="w-16 h-1.5 bg-[#2a2e3a] rounded-full">
+                        <div
+                          className="h-full rounded-full transition-all"
+                          style={{
+                            width: `${Math.min(parseFloat(retPct), 30) / 30 * 100}%`,
+                            background: returnBarColor(r.returnPercent),
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </td>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }

@@ -23,6 +23,7 @@ router.get('/dates', async (_req, res) => {
 /**
  * GET /api/option-scans/:date
  * Get scan results for a specific date.
+ * Values are converted from cents/basis points to dollars/percentages.
  */
 router.get('/:date', async (req, res) => {
   try {

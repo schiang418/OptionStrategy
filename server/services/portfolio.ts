@@ -1,3 +1,16 @@
+/**
+ * Portfolio service -- scan-result persistence, portfolio creation, and P&L
+ * tracking.
+ *
+ * CONVENTIONS:
+ *   - Money is stored in the database as **cents** (integer).
+ *   - Percentages are stored as **basis points** (integer, x10000).
+ *   - The scraper returns **raw float values** (dollars, percent numbers like
+ *     13.57 for 13.57%). This service converts them before DB insertion.
+ *   - Same-day overwrites: if portfolios already exist for a scanDate they
+ *     are deleted and recreated.
+ */
+
 import { eq, and, desc, asc, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
@@ -6,68 +19,144 @@ import {
   optionPortfolioTrades,
   optionPortfolioValueHistory,
   type NewOptionScanResult,
-  type NewOptionPortfolio,
-  type NewOptionPortfolioTrade,
 } from '../db/schema.js';
-import { parseStrike, getTodayET, isExpired } from '../utils/dates.js';
-import { getSpreadValue, getStockPrice, getRealtimeStockPrice } from './polygon.js';
-import { sleep } from '../utils/dates.js';
+import {
+  parseStrike,
+  getTodayET,
+  isExpired,
+  sleep,
+  toCents,
+  fromCents,
+  toBasisPoints,
+  fromBasisPoints,
+} from '../utils/dates.js';
+import {
+  getCreditPutSpreadValue,
+  getStockClosePrice,
+  getCurrentStockPrice,
+  calculateExpiredPnL,
+  checkMarketOpen,
+} from './polygon.js';
 import type { ScanResultRow } from '../../shared/types.js';
 
 const RATE_LIMIT_DELAY = 200;
 
+// Initial capital: $100,000 in cents
+const INITIAL_CAPITAL_CENTS = 10_000_000;
+
+// Filtering thresholds (in stored units -- basis points)
+const MIN_RETURN_BP = 200;   // 2.00 %
+const MIN_PROB_BP = 8_000;   // 80.00 %
+
+const CONTRACTS_PER_TRADE = 4;
+const TRADES_PER_PORTFOLIO = 5;
+
+// ============================================================================
+// Scan-result CRUD
+// ============================================================================
+
 /**
- * Save scan results to the database. Returns the count of inserted rows.
+ * Save scan results to the database.
+ *
+ * The scraper returns raw float values (dollars, percentages as plain numbers
+ * like 13.57 for 13.57%). This function converts them to cents / basis points
+ * before insertion.
+ *
+ * Max Profit and Max Loss from the scraper are per-share dollar values.
+ * We multiply by 100 to get per-contract, then convert to cents.
  */
 export async function saveScanResults(
   results: ScanResultRow[],
   scanName: string,
-  scanDate: string
+  scanDate: string,
 ): Promise<number> {
   if (results.length === 0) return 0;
 
-  const rows: NewOptionScanResult[] = results.map(r => ({
-    ticker: r.ticker,
-    companyName: r.companyName,
-    price: r.price,
-    priceChange: r.priceChange,
-    ivRank: r.ivRank,
-    ivPercentile: r.ivPercentile,
-    strike: r.strike,
-    moneyness: r.moneyness,
-    expDate: r.expDate,
-    daysToExp: r.daysToExp,
-    totalOptVol: r.totalOptVol,
-    probMaxProfit: r.probMaxProfit,
-    maxProfit: r.maxProfit,
-    maxLoss: r.maxLoss,
-    returnPercent: r.returnPercent,
-    scanName,
-    scanDate,
-  }));
+  const rows: NewOptionScanResult[] = results.map(r => {
+    // Normalise the strike string so higher is always first (sell/buy)
+    let strikeStr = r.strike;
+    if (r.strike) {
+      try {
+        const { sellStrike, buyStrike } = parseStrike(r.strike);
+        strikeStr = `${sellStrike}/${buyStrike}`;
+      } catch {}
+    }
+
+    // Max Profit / Max Loss from scraper are per-share dollars.
+    // Multiply by 100 for per-contract, then convert to cents.
+    const maxProfitPerContract = r.maxProfit * 100;
+    const maxLossPerContract = r.maxLoss * 100;
+
+    return {
+      ticker: r.ticker,
+      companyName: r.companyName || null,
+      price: toCents(r.price),
+      priceChange: toCents(r.priceChange),
+      ivRank: toBasisPoints(r.ivRank / 100),         // e.g. 45.2 -> 0.452 -> 4520 bp
+      ivPercentile: toBasisPoints(r.ivPercentile / 100),
+      strike: strikeStr,
+      moneyness: toBasisPoints(r.moneyness / 100),
+      expDate: r.expDate,
+      daysToExp: r.daysToExp,
+      totalOptVol: r.totalOptVol,
+      probMaxProfit: toBasisPoints(r.probMaxProfit / 100),  // 81.31 -> 0.8131 -> 8131 bp
+      maxProfit: toCents(maxProfitPerContract),              // cents per contract
+      maxLoss: toCents(maxLossPerContract),                  // cents per contract
+      returnPercent: toBasisPoints(r.returnPercent / 100),   // 13.57 -> 0.1357 -> 1357 bp
+      scanName,
+      scanDate,
+    };
+  });
 
   const inserted = await db.insert(optionScanResults).values(rows).returning();
   return inserted.length;
 }
 
 /**
- * Check if scan results already exist for a given date and scan name.
+ * Delete existing scan results AND any portfolios for a given date (same-day
+ * overwrite support).
  */
-export async function scanExistsForDate(scanDate: string, scanName: string): Promise<boolean> {
-  const existing = await db
+export async function deleteScanDataForDate(scanDate: string): Promise<void> {
+  // Delete portfolios first (trades + history cascade via FK)
+  await db.delete(optionPortfolios).where(eq(optionPortfolios.scanDate, scanDate));
+  // Delete scan results
+  await db.delete(optionScanResults).where(eq(optionScanResults.scanDate, scanDate));
+}
+
+/**
+ * Check whether scan results exist for a given date + scan name.
+ */
+export async function scanExistsForDate(
+  scanDate: string,
+  scanName: string,
+): Promise<boolean> {
+  const rows = await db
     .select({ count: sql<number>`count(*)` })
     .from(optionScanResults)
     .where(
       and(
         eq(optionScanResults.scanDate, scanDate),
-        eq(optionScanResults.scanName, scanName)
-      )
+        eq(optionScanResults.scanName, scanName),
+      ),
     );
-  return (existing[0]?.count ?? 0) > 0;
+  return (rows[0]?.count ?? 0) > 0;
 }
 
 /**
- * Get all scan dates with result counts.
+ * Check if any scan exists within the last N days.
+ */
+export async function scanExistsInLastNDays(days: number): Promise<boolean> {
+  const result = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(optionScanResults)
+    .where(
+      sql`${optionScanResults.scanDate} >= CURRENT_DATE - ${days}::integer`,
+    );
+  return (result[0]?.count ?? 0) > 0;
+}
+
+/**
+ * Return all scan dates with result counts.
  */
 export async function getScanDates() {
   return db
@@ -82,23 +171,39 @@ export async function getScanDates() {
 }
 
 /**
- * Get scan results for a specific date.
+ * Get scan results for a specific date, converting stored integers back to
+ * human-readable dollars / percentages for the API response.
  */
 export async function getScanResultsByDate(scanDate: string) {
-  return db
+  const rows = await db
     .select()
     .from(optionScanResults)
     .where(eq(optionScanResults.scanDate, scanDate))
     .orderBy(desc(optionScanResults.returnPercent));
+
+  return rows.map(r => ({
+    ...r,
+    // Convert cents -> dollars for the API consumer
+    price: r.price != null ? fromCents(r.price) : null,
+    priceChange: r.priceChange != null ? fromCents(r.priceChange) : null,
+    maxProfit: r.maxProfit != null ? fromCents(r.maxProfit) : null,
+    maxLoss: r.maxLoss != null ? fromCents(r.maxLoss) : null,
+    // Convert basis points -> decimal percentage
+    ivRank: r.ivRank != null ? fromBasisPoints(r.ivRank) : null,
+    ivPercentile: r.ivPercentile != null ? fromBasisPoints(r.ivPercentile) : null,
+    probMaxProfit: r.probMaxProfit != null ? fromBasisPoints(r.probMaxProfit) : null,
+    returnPercent: r.returnPercent != null ? fromBasisPoints(r.returnPercent) : null,
+    moneyness: r.moneyness != null ? fromBasisPoints(r.moneyness) : null,
+  }));
 }
 
 /**
- * Delete scan results and associated portfolios for a date.
+ * Delete scan data + cascading portfolios for a date.  Returns count of
+ * deleted scan rows.
  */
-export async function deleteScanData(scanDate: string) {
-  // Delete portfolios (trades and history cascade)
+export async function deleteScanData(scanDate: string): Promise<number> {
+  // Portfolios cascade on FK delete
   await db.delete(optionPortfolios).where(eq(optionPortfolios.scanDate, scanDate));
-  // Delete scan results
   const deleted = await db
     .delete(optionScanResults)
     .where(eq(optionScanResults.scanDate, scanDate))
@@ -106,67 +211,126 @@ export async function deleteScanData(scanDate: string) {
   return deleted.length;
 }
 
+// ============================================================================
+// Portfolio creation
+// ============================================================================
+
 /**
- * Create portfolios from scan results.
- * Creates two portfolios: top_return and top_probability.
+ * Create two portfolios (top_return and top_probability) from a scan date's
+ * results following OptionScope's logic.
+ *
+ * SAME-DAY OVERWRITE: if portfolios already exist for that scanDate, the old
+ * ones are deleted first and new ones are created.
+ *
+ * Returns the IDs of the two created portfolios, or null for a type if no
+ * trades qualify.
  */
 export async function createPortfoliosFromScan(
   scanDate: string,
-  scanName: string = 'bi-weekly income all'
-): Promise<{ topReturn: number; topProbability: number }> {
-  // Check if portfolios already exist for this scan date
-  const existing = await db
+  scanName: string = 'bi-weekly income all',
+): Promise<{ topReturn: number | null; topProbability: number | null }> {
+  // ---- Same-day overwrite: delete any existing portfolios for this date ----
+  const existingPortfolios = await db
     .select()
     .from(optionPortfolios)
     .where(
       and(
         eq(optionPortfolios.scanDate, scanDate),
-        eq(optionPortfolios.scanName, scanName)
-      )
+        eq(optionPortfolios.scanName, scanName),
+      ),
     );
 
-  if (existing.length > 0) {
-    console.log(`[Portfolio] Portfolios already exist for ${scanDate}, skipping creation`);
-    return { topReturn: 0, topProbability: 0 };
+  if (existingPortfolios.length > 0) {
+    console.log(
+      `[Portfolio] Deleting ${existingPortfolios.length} existing portfolio(s) for ${scanDate} (same-day overwrite)`,
+    );
+    await db.delete(optionPortfolios).where(
+      and(
+        eq(optionPortfolios.scanDate, scanDate),
+        eq(optionPortfolios.scanName, scanName),
+      ),
+    );
   }
 
-  // Get scan results
+  // ---- Fetch scan results (values are in cents / basis points) ----
   const results = await db
     .select()
     .from(optionScanResults)
     .where(
       and(
         eq(optionScanResults.scanDate, scanDate),
-        eq(optionScanResults.scanName, scanName)
-      )
+        eq(optionScanResults.scanName, scanName),
+      ),
     );
 
   if (results.length === 0) {
     throw new Error(`No scan results found for ${scanDate}`);
   }
 
-  // Sort and pick top 5 for each portfolio type
-  const byReturn = [...results]
-    .sort((a, b) => (b.returnPercent ?? 0) - (a.returnPercent ?? 0))
-    .slice(0, 5);
+  // ---- Filter qualifying trades ----
+  const qualifying = results.filter(r => {
+    const ret = r.returnPercent ?? 0;
+    const prob = r.probMaxProfit ?? 0;
+    return ret >= MIN_RETURN_BP && prob >= MIN_PROB_BP;
+  });
 
-  const byProbability = [...results]
-    .sort((a, b) => (b.probMaxProfit ?? 0) - (a.probMaxProfit ?? 0))
-    .slice(0, 5);
+  console.log(
+    `[Portfolio] ${qualifying.length} of ${results.length} trades qualify ` +
+    `(return >= ${MIN_RETURN_BP} bp, prob >= ${MIN_PROB_BP} bp)`,
+  );
 
-  const topReturnId = await createPortfolio('top_return', scanDate, scanName, byReturn);
-  const topProbabilityId = await createPortfolio('top_probability', scanDate, scanName, byProbability);
+  if (qualifying.length === 0) {
+    console.log('[Portfolio] No qualifying trades -- skipping portfolio creation');
+    return { topReturn: null, topProbability: null };
+  }
 
-  return { topReturn: topReturnId, topProbability: topProbabilityId };
+  // ---- Pick top 5 for each type (cycle if fewer qualify) ----
+  const pickTop5 = (
+    sorted: typeof qualifying,
+  ): typeof qualifying => {
+    const picked: typeof qualifying = [];
+    for (let i = 0; i < TRADES_PER_PORTFOLIO; i++) {
+      picked.push(sorted[i % sorted.length]);
+    }
+    return picked;
+  };
+
+  const byReturn = [...qualifying].sort(
+    (a, b) => (b.returnPercent ?? 0) - (a.returnPercent ?? 0),
+  );
+  const byProb = [...qualifying].sort(
+    (a, b) => (b.probMaxProfit ?? 0) - (a.probMaxProfit ?? 0),
+  );
+
+  const topReturnTrades = pickTop5(byReturn);
+  const topProbTrades = pickTop5(byProb);
+
+  const topReturnId = await createPortfolio(
+    'top_return',
+    scanDate,
+    scanName,
+    topReturnTrades,
+  );
+  const topProbId = await createPortfolio(
+    'top_probability',
+    scanDate,
+    scanName,
+    topProbTrades,
+  );
+
+  return { topReturn: topReturnId, topProbability: topProbId };
 }
+
+// ---------------------------------------------------------------------------
+// Internal: create a single portfolio with its trades
+// ---------------------------------------------------------------------------
 
 async function createPortfolio(
   type: 'top_return' | 'top_probability',
   scanDate: string,
   scanName: string,
-  scanResults: typeof optionScanResults.$inferSelect[]
+  scanResults: (typeof optionScanResults.$inferSelect)[],
 ): Promise<number> {
-  // Create portfolio
   const [portfolio] = await db
     .insert(optionPortfolios)
     .values({
@@ -174,77 +338,93 @@ async function createPortfolio(
       scanDate,
       scanName,
       status: 'active',
-      initialCapital: 100000,
+      initialCapital: INITIAL_CAPITAL_CENTS,
       totalPremiumCollected: 0,
-      currentValue: 100000,
+      currentValue: INITIAL_CAPITAL_CENTS,
       netPnl: 0,
     })
     .returning();
 
-  let totalPremium = 0;
+  let totalPremiumCents = 0;
 
-  // Create trades
   for (const result of scanResults) {
     if (!result.strike || !result.expDate) continue;
 
-    const { sell, buy } = parseStrike(result.strike);
-    const contracts = 4;
-    const premiumPerContract = result.maxProfit ?? 0;
-    const premiumCollected = premiumPerContract * contracts;
-    const spreadWidth = sell - buy;
-    const maxLossPerContract = (spreadWidth * 100) - premiumPerContract;
+    // Parse strikes (dollar values) -- higher = sell, lower = buy
+    const { sellStrike, buyStrike } = parseStrike(result.strike);
 
-    // Try to get stock entry price from Polygon
-    let stockPriceAtEntry = result.price;
+    const contracts = CONTRACTS_PER_TRADE;
+
+    // premiumCollected per contract = maxProfit from scan (already per-contract in cents)
+    const premiumPerContractCents = result.maxProfit ?? 0;
+
+    // spreadWidth = (sellStrike - buyStrike) * 100, in cents
+    // Strike values are in dollars, difference in dollars, *100 for per-share->per-contract, then toCents
+    const spreadWidthCents = toCents((sellStrike - buyStrike) * 100);
+
+    // maxLossPerContract = spreadWidth - premiumCollected, in cents
+    const maxLossPerContractCents = spreadWidthCents - premiumPerContractCents;
+
+    // Sell/buy strikes stored in cents
+    const sellStrikeCents = toCents(sellStrike);
+    const buyStrikeCents = toCents(buyStrike);
+
+    // Try to get stock entry price from Polygon (returns cents)
+    let stockPriceAtEntryCents = result.price ?? 0; // already in cents from saveScanResults
     try {
-      const stockData = await getStockPrice(result.ticker, scanDate);
-      if (stockData) {
-        stockPriceAtEntry = stockData.close;
+      const closePriceCents = await getStockClosePrice(result.ticker, scanDate);
+      if (closePriceCents != null) {
+        stockPriceAtEntryCents = closePriceCents;
       }
       await sleep(RATE_LIMIT_DELAY);
     } catch {
-      // Use scan price as fallback
+      // Use scan price as fallback (already in cents)
     }
 
     await db.insert(optionPortfolioTrades).values({
       portfolioId: portfolio.id,
       ticker: result.ticker,
-      stockPriceAtEntry,
-      sellStrike: sell,
-      buyStrike: buy,
+      stockPriceAtEntry: stockPriceAtEntryCents,
+      sellStrike: sellStrikeCents,
+      buyStrike: buyStrikeCents,
       expirationDate: result.expDate,
       contracts,
-      premiumCollected,
-      spreadWidth,
-      maxLossPerContract,
+      premiumCollected: premiumPerContractCents,
+      spreadWidth: spreadWidthCents,
+      maxLossPerContract: maxLossPerContractCents,
       currentSpreadValue: 0,
-      currentStockPrice: stockPriceAtEntry,
-      currentPnl: premiumCollected,
+      currentStockPrice: stockPriceAtEntryCents,
+      currentPnl: premiumPerContractCents * contracts, // initial P&L = all premium
       status: 'open',
-      isItm: 0,
+      isItm: false,
     });
 
-    totalPremium += premiumCollected;
+    totalPremiumCents += premiumPerContractCents * contracts;
   }
 
-  // Update portfolio with total premium
+  // Update portfolio totals
   await db
     .update(optionPortfolios)
     .set({
-      totalPremiumCollected: totalPremium,
-      currentValue: 100000 + totalPremium,
-      netPnl: totalPremium,
+      totalPremiumCollected: totalPremiumCents,
+      currentValue: INITIAL_CAPITAL_CENTS + totalPremiumCents,
+      netPnl: totalPremiumCents,
       updatedAt: new Date(),
     })
     .where(eq(optionPortfolios.id, portfolio.id));
 
-  console.log(`[Portfolio] Created ${type} portfolio #${portfolio.id} with ${scanResults.length} trades, premium: $${totalPremium}`);
+  console.log(
+    `[Portfolio] Created ${type} portfolio #${portfolio.id} with ${scanResults.length} trades, ` +
+    `premium: $${fromCents(totalPremiumCents).toFixed(2)}`,
+  );
+
   return portfolio.id;
 }
 
-/**
- * Get all portfolios.
- */
+// ============================================================================
+// Portfolio queries
+// ============================================================================
+
 export async function getAllPortfolios() {
   return db
     .select()
@@ -252,9 +432,6 @@ export async function getAllPortfolios() {
     .orderBy(desc(optionPortfolios.scanDate));
 }
 
-/**
- * Get a portfolio with its trades.
- */
 export async function getPortfolioWithTrades(portfolioId: number) {
   const [portfolio] = await db
     .select()
@@ -272,8 +449,12 @@ export async function getPortfolioWithTrades(portfolioId: number) {
   return { ...portfolio, trades };
 }
 
+// ============================================================================
+// P&L updates
+// ============================================================================
+
 /**
- * Update P&L for all active portfolios.
+ * Update P&L for **all** active portfolios using live Polygon data.
  */
 export async function updateAllPortfolioPnl(): Promise<void> {
   const activePortfolios = await db
@@ -298,62 +479,65 @@ async function updatePortfolioPnl(portfolioId: number): Promise<void> {
     .from(optionPortfolioTrades)
     .where(eq(optionPortfolioTrades.portfolioId, portfolioId));
 
-  let totalPnl = 0;
-  let allClosed = true;
+  let totalPnlCents = 0;
 
   for (const trade of trades) {
+    // Already closed -- just accumulate its final P&L
     if (trade.status !== 'open') {
-      totalPnl += trade.currentPnl ?? 0;
+      totalPnlCents += trade.currentPnl ?? 0;
       continue;
     }
 
-    allClosed = false;
-
-    // Check if expired
+    // ---- Check expiration ----
     if (isExpired(trade.expirationDate)) {
       await handleExpiration(trade);
-      // Re-fetch updated trade
       const [updated] = await db
         .select()
         .from(optionPortfolioTrades)
         .where(eq(optionPortfolioTrades.id, trade.id));
-      totalPnl += updated?.currentPnl ?? 0;
+      totalPnlCents += updated?.currentPnl ?? 0;
       continue;
     }
 
-    // Get current spread value
+    // ---- Live spread value ----
     try {
-      const spreadData = await getSpreadValue(
+      // Strikes stored in cents -- Polygon needs dollars
+      const sellStrikeDollars = fromCents(trade.sellStrike);
+      const buyStrikeDollars = fromCents(trade.buyStrike);
+
+      const spreadData = await getCreditPutSpreadValue(
         trade.ticker,
+        sellStrikeDollars,
+        buyStrikeDollars,
         trade.expirationDate,
-        trade.sellStrike,
-        trade.buyStrike
       );
 
       if (spreadData) {
-        const currentPnl = trade.premiumCollected - (spreadData.spreadValue * trade.contracts);
-        const isItm = spreadData.underlyingPrice <= trade.sellStrike ? 1 : 0;
+        // currentPnl = (premiumCollected - spreadValue) * contracts  (all in cents)
+        const currentPnlCents =
+          (trade.premiumCollected - spreadData.spreadValueCents) * trade.contracts;
+        const isItm = spreadData.underlyingPriceCents <= trade.sellStrike;
 
         await db
           .update(optionPortfolioTrades)
           .set({
-            currentSpreadValue: spreadData.spreadValue,
-            currentStockPrice: spreadData.underlyingPrice,
-            currentPnl,
+            currentSpreadValue: spreadData.spreadValueCents,
+            currentStockPrice: spreadData.underlyingPriceCents,
+            currentPnl: currentPnlCents,
             isItm,
             updatedAt: new Date(),
           })
           .where(eq(optionPortfolioTrades.id, trade.id));
 
-        totalPnl += currentPnl;
+        totalPnlCents += currentPnlCents;
       } else {
-        totalPnl += trade.currentPnl ?? 0;
+        totalPnlCents += trade.currentPnl ?? 0;
       }
 
       await sleep(RATE_LIMIT_DELAY);
     } catch (error: any) {
       console.error(`[P&L] Error updating trade ${trade.id}:`, error.message);
-      totalPnl += trade.currentPnl ?? 0;
+      totalPnlCents += trade.currentPnl ?? 0;
     }
   }
 
@@ -364,85 +548,82 @@ async function updatePortfolioPnl(portfolioId: number): Promise<void> {
     .where(
       and(
         eq(optionPortfolioTrades.portfolioId, portfolioId),
-        eq(optionPortfolioTrades.status, 'open')
-      )
+        eq(optionPortfolioTrades.status, 'open'),
+      ),
     );
-  allClosed = openTrades.length === 0;
+  const allClosed = openTrades.length === 0;
 
   // Update portfolio totals
-  const portfolioValue = 100000 + totalPnl;
+  const portfolioValueCents = INITIAL_CAPITAL_CENTS + totalPnlCents;
   await db
     .update(optionPortfolios)
     .set({
-      currentValue: portfolioValue,
-      netPnl: totalPnl,
+      currentValue: portfolioValueCents,
+      netPnl: totalPnlCents,
       lastUpdated: new Date(),
       status: allClosed ? 'closed' : 'active',
       updatedAt: new Date(),
     })
     .where(eq(optionPortfolios.id, portfolioId));
 
-  // Record value history
+  // Record value history snapshot (upsert — same-day overwrite)
   const today = getTodayET();
-  await db.insert(optionPortfolioValueHistory).values({
-    portfolioId,
-    date: today,
-    portfolioValue,
-    netPnl: totalPnl,
-  });
+  await upsertValueHistory(portfolioId, today, portfolioValueCents, totalPnlCents);
 
-  console.log(`[P&L] Portfolio #${portfolioId}: value=$${portfolioValue.toFixed(2)}, pnl=$${totalPnl.toFixed(2)}`);
+  console.log(
+    `[P&L] Portfolio #${portfolioId}: value=$${fromCents(portfolioValueCents).toFixed(2)}, ` +
+    `pnl=$${fromCents(totalPnlCents).toFixed(2)}`,
+  );
 }
 
-/**
- * Handle trade expiration logic.
- */
+// ---------------------------------------------------------------------------
+// Expiration handler
+// ---------------------------------------------------------------------------
+
 async function handleExpiration(
-  trade: typeof optionPortfolioTrades.$inferSelect
+  trade: typeof optionPortfolioTrades.$inferSelect,
 ): Promise<void> {
-  // Get current stock price to determine outcome
-  let stockPrice = trade.currentStockPrice;
+  // Get stock closing / current price (in cents)
+  let stockPriceCents = trade.currentStockPrice ?? 0;
   try {
-    const realtimePrice = await getRealtimeStockPrice(trade.ticker);
-    if (realtimePrice) stockPrice = realtimePrice;
+    const realtimePrice = await getCurrentStockPrice(trade.ticker);
+    if (realtimePrice != null) stockPriceCents = realtimePrice;
   } catch {}
 
-  let pnl: number;
-  let status: 'expired_profit' | 'expired_loss';
+  // calculateExpiredPnL takes strikes in DOLLARS, premium in cents, stock in cents
+  const sellStrikeDollars = fromCents(trade.sellStrike);
+  const buyStrikeDollars = fromCents(trade.buyStrike);
 
-  if (!stockPrice || stockPrice >= trade.sellStrike) {
-    // Stock >= sell strike → max profit (keep all premium)
-    pnl = trade.premiumCollected;
-    status = 'expired_profit';
-  } else if (stockPrice <= trade.buyStrike) {
-    // Stock <= buy strike → max loss
-    pnl = -(trade.spreadWidth * 100 - trade.premiumCollected / trade.contracts) * trade.contracts;
-    status = 'expired_loss';
-  } else {
-    // Between strikes → partial loss based on intrinsic value
-    const intrinsicValue = (trade.sellStrike - stockPrice) * 100;
-    pnl = trade.premiumCollected - (intrinsicValue * trade.contracts);
-    status = pnl >= 0 ? 'expired_profit' : 'expired_loss';
-  }
+  const { pnl, status, isItm } = calculateExpiredPnL(
+    sellStrikeDollars,
+    buyStrikeDollars,
+    trade.premiumCollected, // cents per contract
+    stockPriceCents,        // cents
+    trade.contracts,
+  );
 
   await db
     .update(optionPortfolioTrades)
     .set({
       status,
       currentPnl: pnl,
-      currentStockPrice: stockPrice,
+      currentStockPrice: stockPriceCents,
       currentSpreadValue: 0,
-      isItm: 0,
+      isItm,
       updatedAt: new Date(),
     })
     .where(eq(optionPortfolioTrades.id, trade.id));
 
-  console.log(`[Expiration] Trade #${trade.id} (${trade.ticker}): ${status}, P&L: $${pnl.toFixed(2)}`);
+  console.log(
+    `[Expiration] Trade #${trade.id} (${trade.ticker}): ${status}, ` +
+    `P&L: $${fromCents(pnl).toFixed(2)}`,
+  );
 }
 
-/**
- * Get portfolio value history.
- */
+// ============================================================================
+// History
+// ============================================================================
+
 export async function getPortfolioHistory(portfolioId: number) {
   return db
     .select()
@@ -450,3 +631,128 @@ export async function getPortfolioHistory(portfolioId: number) {
     .where(eq(optionPortfolioValueHistory.portfolioId, portfolioId))
     .orderBy(asc(optionPortfolioValueHistory.date));
 }
+
+// ============================================================================
+// Snapshot upsert (same-day overwrite from SwingTrade pattern)
+// ============================================================================
+
+async function upsertValueHistory(
+  portfolioId: number,
+  date: string,
+  portfolioValue: number,
+  netPnl: number,
+): Promise<void> {
+  const [existing] = await db
+    .select()
+    .from(optionPortfolioValueHistory)
+    .where(
+      and(
+        eq(optionPortfolioValueHistory.portfolioId, portfolioId),
+        eq(optionPortfolioValueHistory.date, date),
+      ),
+    );
+
+  if (existing) {
+    await db
+      .update(optionPortfolioValueHistory)
+      .set({ portfolioValue, netPnl })
+      .where(eq(optionPortfolioValueHistory.id, existing.id));
+  } else {
+    await db.insert(optionPortfolioValueHistory).values({
+      portfolioId,
+      date,
+      portfolioValue,
+      netPnl,
+    });
+  }
+}
+
+// ============================================================================
+// Additional queries
+// ============================================================================
+
+/**
+ * Get portfolios for a specific scan date.
+ */
+export async function getPortfoliosByDate(scanDate: string) {
+  return db
+    .select()
+    .from(optionPortfolios)
+    .where(eq(optionPortfolios.scanDate, scanDate))
+    .orderBy(asc(optionPortfolios.type));
+}
+
+/**
+ * Get all portfolios with value history for performance comparison.
+ * Used by the comparison chart to show Top Return vs Top Probability over time.
+ */
+export async function getPortfolioComparison() {
+  const allPortfolios = await db
+    .select()
+    .from(optionPortfolios)
+    .orderBy(asc(optionPortfolios.scanDate));
+
+  const allSnapshots = await db
+    .select()
+    .from(optionPortfolioValueHistory)
+    .orderBy(asc(optionPortfolioValueHistory.date));
+
+  // Group snapshots by portfolio
+  const snapshotsByPortfolio: Record<
+    number,
+    { date: string; portfolioValue: number; netPnl: number }[]
+  > = {};
+  for (const s of allSnapshots) {
+    if (!snapshotsByPortfolio[s.portfolioId]) {
+      snapshotsByPortfolio[s.portfolioId] = [];
+    }
+    snapshotsByPortfolio[s.portfolioId].push({
+      date: s.date,
+      portfolioValue: s.portfolioValue,
+      netPnl: s.netPnl,
+    });
+  }
+
+  return allPortfolios.map(p => ({
+    id: p.id,
+    type: p.type,
+    scanDate: p.scanDate,
+    scanName: p.scanName,
+    status: p.status,
+    initialCapital: p.initialCapital,
+    currentValue: p.currentValue,
+    netPnl: p.netPnl,
+    totalPremiumCollected: p.totalPremiumCollected,
+    snapshots: snapshotsByPortfolio[p.id] || [],
+  }));
+}
+
+/**
+ * Get all trades across all portfolios for the AllTrades table.
+ */
+export async function getAllTrades() {
+  const trades = await db
+    .select()
+    .from(optionPortfolioTrades)
+    .orderBy(desc(optionPortfolioTrades.expirationDate));
+
+  // Get portfolio info for each trade
+  const portfolioIds = [...new Set(trades.map(t => t.portfolioId))];
+  const portfolioMap: Record<number, typeof optionPortfolios.$inferSelect> = {};
+
+  for (const id of portfolioIds) {
+    const [p] = await db.select().from(optionPortfolios).where(eq(optionPortfolios.id, id));
+    if (p) portfolioMap[id] = p;
+  }
+
+  return trades.map(t => ({
+    ...t,
+    portfolioType: portfolioMap[t.portfolioId]?.type,
+    portfolioScanDate: portfolioMap[t.portfolioId]?.scanDate,
+  }));
+}
+
+/**
+ * Update P&L for a single portfolio (public, for manual update button).
+ */
+export { updatePortfolioPnl };

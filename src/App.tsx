@@ -1,82 +1,321 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import Header from './components/Header';
+import { ChevronLeft, ChevronRight, RefreshCw, Loader2, BarChart3, TrendingUp, List } from 'lucide-react';
+import {
+  fetchScanDates,
+  fetchScanResults,
+  fetchPortfoliosByDate,
+  fetchPortfolioDetail,
+  fetchAllTrades,
+  updateAllPnl,
+  runMondayWorkflow,
+  type ScanDate,
+  type ScanResult,
+  type Portfolio,
+  type PortfolioWithTrades,
+  type Trade,
+} from './api';
 import ScanResultsPanel from './components/ScanResultsPanel';
 import PortfolioCards from './components/PortfolioCards';
 import PerformanceChart from './components/PerformanceChart';
 import AllTradesTable from './components/AllTradesTable';
-import { fetchScanDates, fetchPortfolios, fetchPortfolioDetail } from './api';
+
+type ViewTab = 'overview' | 'trades' | 'comparison';
+
+const TAB_LABELS: Record<ViewTab, string> = {
+  overview: 'Overview',
+  trades: 'All Trades',
+  comparison: 'Performance',
+};
 
 export default function App() {
-  const [scanDates, setScanDates] = useState<any[]>([]);
-  const [portfolios, setPortfolios] = useState<any[]>([]);
-  const [portfolioDetails, setPortfolioDetails] = useState<Record<number, any>>({});
-  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<ViewTab>('overview');
+  const [scanDates, setScanDates] = useState<ScanDate[]>([]);
+  const [currentDateIdx, setCurrentDateIdx] = useState(0);
+  const [scanResults, setScanResults] = useState<ScanResult[]>([]);
+  const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
+  const [portfolioDetails, setPortfolioDetails] = useState<Record<number, PortfolioWithTrades>>({});
+  const [allTrades, setAllTrades] = useState<Trade[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [scanLoading, setScanLoading] = useState(false);
+  const [pnlLoading, setPnlLoading] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  const loadData = useCallback(async () => {
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  // Load scan dates list
+  const loadDates = useCallback(async () => {
     try {
-      setLoading(true);
-      const [dates, portfolioList] = await Promise.all([
-        fetchScanDates().catch(() => []),
-        fetchPortfolios().catch(() => []),
-      ]);
+      const dates = await fetchScanDates();
       setScanDates(dates);
+      return dates;
+    } catch {
+      setScanDates([]);
+      return [];
+    }
+  }, []);
+
+  // Load data for a specific scan date
+  const loadDateData = useCallback(async (date: string) => {
+    setLoading(true);
+    try {
+      const [results, portfolioList] = await Promise.all([
+        fetchScanResults(date).catch(() => []),
+        fetchPortfoliosByDate(date).catch(() => []),
+      ]);
+      setScanResults(results);
       setPortfolios(portfolioList);
 
       // Load details for each portfolio
-      const details: Record<number, any> = {};
+      const details: Record<number, PortfolioWithTrades> = {};
       for (const p of portfolioList) {
         try {
-          const detail = await fetchPortfolioDetail(p.id);
-          details[p.id] = detail;
+          details[p.id] = await fetchPortfolioDetail(p.id);
         } catch {}
       }
       setPortfolioDetails(details);
-    } catch (error) {
-      console.error('Failed to load data:', error);
+    } catch (err: any) {
+      console.error('Failed to load date data:', err.message);
     } finally {
       setLoading(false);
     }
   }, []);
 
+  // Load all trades (for the trades tab)
+  const loadAllTrades = useCallback(async () => {
+    try {
+      const trades = await fetchAllTrades();
+      setAllTrades(trades);
+    } catch {
+      setAllTrades([]);
+    }
+  }, []);
+
+  // Initial load
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    (async () => {
+      const dates = await loadDates();
+      if (dates.length > 0) {
+        setCurrentDateIdx(0);
+        await loadDateData(dates[0].scanDate);
+      }
+    })();
+  }, [loadDates, loadDateData]);
 
-  const lastScanDate = scanDates.length > 0 ? scanDates[0].scanDate : null;
+  // Load trades when switching to trades tab
+  useEffect(() => {
+    if (activeTab === 'trades') {
+      loadAllTrades();
+    }
+  }, [activeTab, loadAllTrades]);
 
-  // Collect all trades from all portfolios
-  const allTrades = Object.values(portfolioDetails).flatMap((p: any) =>
-    (p.trades || []).map((t: any) => ({
-      ...t,
-      portfolioType: p.type,
-      portfolioScanDate: p.scanDate,
-    }))
-  );
+  // Date navigation
+  const currentDate = scanDates[currentDateIdx];
+
+  const handlePrevDate = async () => {
+    if (currentDateIdx < scanDates.length - 1) {
+      const newIdx = currentDateIdx + 1;
+      setCurrentDateIdx(newIdx);
+      await loadDateData(scanDates[newIdx].scanDate);
+    }
+  };
+
+  const handleNextDate = async () => {
+    if (currentDateIdx > 0) {
+      const newIdx = currentDateIdx - 1;
+      setCurrentDateIdx(newIdx);
+      await loadDateData(scanDates[newIdx].scanDate);
+    }
+  };
+
+  // Actions
+  const handleRunScan = async () => {
+    setScanLoading(true);
+    try {
+      const result = await runMondayWorkflow(true);
+      showToast(result.message || 'Scan complete');
+      const dates = await loadDates();
+      if (dates.length > 0) {
+        setCurrentDateIdx(0);
+        await loadDateData(dates[0].scanDate);
+      }
+    } catch (err: any) {
+      showToast(`Error: ${err.message}`, 'error');
+    } finally {
+      setScanLoading(false);
+    }
+  };
+
+  const handleUpdatePnl = async () => {
+    setPnlLoading(true);
+    try {
+      const result = await updateAllPnl();
+      showToast(result.message || 'P&L updated');
+      if (currentDate) {
+        await loadDateData(currentDate.scanDate);
+      }
+    } catch (err: any) {
+      showToast(`Error: ${err.message}`, 'error');
+    } finally {
+      setPnlLoading(false);
+    }
+  };
+
+  const handleDataChange = async () => {
+    const dates = await loadDates();
+    if (dates.length > 0) {
+      const idx = Math.min(currentDateIdx, dates.length - 1);
+      setCurrentDateIdx(idx);
+      await loadDateData(dates[idx].scanDate);
+    } else {
+      setScanResults([]);
+      setPortfolios([]);
+      setPortfolioDetails({});
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-[#0f1117] text-gray-100">
-      <Header lastScanDate={lastScanDate} onRefresh={loadData} />
+    <div className="max-w-[1400px] mx-auto px-4 py-6">
+      {/* Toast notification */}
+      {toast && (
+        <div
+          className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg text-sm font-medium
+            ${toast.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}
+        >
+          {toast.message}
+        </div>
+      )}
 
-      <main className="max-w-7xl mx-auto px-4 py-6 space-y-8">
-        {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <div className="text-gray-400 text-lg">Loading...</div>
+      {/* Header */}
+      <header className="text-center mb-8">
+        <h1 className="text-2xl font-bold mb-1">Option Income Strategy</h1>
+        <p className="text-[#8b8fa3] text-sm">
+          Automated credit put spread scanning with portfolio tracking
+        </p>
+      </header>
+
+      {/* Controls Row: Tabs + Action Buttons */}
+      <div className="flex flex-wrap items-center gap-3 mb-6">
+        {/* Tab buttons */}
+        <div className="flex bg-[#1a1d27] rounded-lg p-1">
+          {(Object.entries(TAB_LABELS) as [ViewTab, string][]).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key)}
+              className={`px-4 py-2 rounded-md text-sm font-semibold transition-all
+                ${activeTab === key
+                  ? 'bg-[#4f8ff7] text-white'
+                  : 'text-[#8b8fa3] hover:text-white'
+                }`}
+            >
+              {key === 'overview' && <List className="w-4 h-4 inline mr-1.5 -mt-0.5" />}
+              {key === 'trades' && <TrendingUp className="w-4 h-4 inline mr-1.5 -mt-0.5" />}
+              {key === 'comparison' && <BarChart3 className="w-4 h-4 inline mr-1.5 -mt-0.5" />}
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex-1" />
+
+        {/* Action buttons */}
+        <button
+          onClick={handleUpdatePnl}
+          disabled={pnlLoading || scanLoading}
+          className="flex items-center gap-2 px-4 py-2 bg-[#1a1d27] hover:bg-[#242836]
+            border border-[#2a2e3a] rounded-lg text-sm font-medium transition-all disabled:opacity-50"
+        >
+          {pnlLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+          {pnlLoading ? 'Updating...' : 'Update P&L'}
+        </button>
+
+        <button
+          onClick={handleRunScan}
+          disabled={scanLoading || pnlLoading}
+          className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700
+            rounded-lg text-sm font-medium text-white transition-all disabled:opacity-50"
+        >
+          {scanLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <TrendingUp className="w-4 h-4" />}
+          {scanLoading ? 'Scanning...' : 'Run Scan & Build'}
+        </button>
+      </div>
+
+      {/* Date Navigation (for overview tab) */}
+      {activeTab === 'overview' && scanDates.length > 0 && (
+        <div className="flex items-center justify-center gap-4 mb-6">
+          <button
+            onClick={handlePrevDate}
+            disabled={currentDateIdx >= scanDates.length - 1 || loading}
+            className="p-2 rounded-lg bg-[#1a1d27] hover:bg-[#242836] border border-[#2a2e3a]
+              disabled:opacity-30 transition-all"
+          >
+            <ChevronLeft className="w-5 h-5" />
+          </button>
+          <div className="text-center min-w-[200px]">
+            <div className="text-lg font-bold">{currentDate?.scanDate}</div>
+            <div className="text-xs text-[#8b8fa3]">
+              {currentDate?.scanName} - {currentDate?.resultCount} results
+            </div>
           </div>
-        ) : (
-          <>
-            <ScanResultsPanel scanDates={scanDates} onDataChange={loadData} />
+          <button
+            onClick={handleNextDate}
+            disabled={currentDateIdx <= 0 || loading}
+            className="p-2 rounded-lg bg-[#1a1d27] hover:bg-[#242836] border border-[#2a2e3a]
+              disabled:opacity-30 transition-all"
+          >
+            <ChevronRight className="w-5 h-5" />
+          </button>
+          <span className="text-xs text-[#8b8fa3]">
+            {currentDateIdx + 1} of {scanDates.length}
+          </span>
+        </div>
+      )}
 
-            <PortfolioCards
-              portfolios={portfolios}
-              portfolioDetails={portfolioDetails}
-            />
+      {/* Loading state */}
+      {loading && (
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="w-8 h-8 animate-spin text-[#4f8ff7]" />
+        </div>
+      )}
 
-            <PerformanceChart portfolios={portfolios} />
+      {/* No data placeholder */}
+      {!loading && scanDates.length === 0 && activeTab === 'overview' && (
+        <div className="text-center py-20">
+          <p className="text-[#8b8fa3] text-lg mb-4">No scan data yet</p>
+          <p className="text-[#8b8fa3] text-sm">
+            Run a scan to get started with credit put spread analysis.
+          </p>
+        </div>
+      )}
 
-            <AllTradesTable trades={allTrades} />
-          </>
-        )}
-      </main>
+      {/* Overview tab */}
+      {!loading && activeTab === 'overview' && scanDates.length > 0 && (
+        <>
+          <PortfolioCards
+            portfolios={portfolios}
+            portfolioDetails={portfolioDetails}
+            onRefresh={() => currentDate && loadDateData(currentDate.scanDate)}
+          />
+
+          <ScanResultsPanel
+            results={scanResults}
+            scanDate={currentDate?.scanDate || ''}
+            onDataChange={handleDataChange}
+          />
+        </>
+      )}
+
+      {/* Trades tab */}
+      {activeTab === 'trades' && (
+        <AllTradesTable trades={allTrades} />
+      )}
+
+      {/* Performance/Comparison tab */}
+      {activeTab === 'comparison' && (
+        <PerformanceChart />
+      )}
     </div>
   );
 }

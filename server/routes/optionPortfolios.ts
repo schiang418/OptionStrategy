@@ -1,19 +1,55 @@
 import { Router } from 'express';
 import {
   getAllPortfolios,
+  getPortfoliosByDate,
   getPortfolioWithTrades,
   updateAllPortfolioPnl,
+  updatePortfolioPnl,
   getPortfolioHistory,
+  getPortfolioComparison,
+  getAllTrades,
 } from '../services/portfolio.js';
 
 const router = Router();
 
 /**
- * GET /api/option-portfolios
- * List all portfolios.
+ * GET /api/option-portfolios/comparison
+ * Performance comparison data for all portfolios (grouped by type).
+ * NOTE: Must be defined BEFORE /:id to avoid Express matching "comparison" as an id.
  */
-router.get('/', async (_req, res) => {
+router.get('/comparison', async (_req, res) => {
   try {
+    const data = await getPortfolioComparison();
+    res.json(data);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/option-portfolios/trades
+ * All trades across all portfolios.
+ */
+router.get('/trades', async (_req, res) => {
+  try {
+    const trades = await getAllTrades();
+    res.json(trades);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/option-portfolios
+ * List all portfolios. Optional ?date= filter.
+ */
+router.get('/', async (req, res) => {
+  try {
+    const { date } = req.query;
+    if (date && typeof date === 'string') {
+      const portfolios = await getPortfoliosByDate(date);
+      return res.json(portfolios);
+    }
     const portfolios = await getAllPortfolios();
     res.json(portfolios);
   } catch (error: any) {
@@ -45,7 +81,7 @@ router.get('/:id', async (req, res) => {
 
 /**
  * POST /api/option-portfolios/update-pnl
- * Update all active portfolios P&L.
+ * Update P&L for all active portfolios.
  */
 router.post('/update-pnl', async (_req, res) => {
   try {
@@ -54,6 +90,25 @@ router.post('/update-pnl', async (_req, res) => {
     res.json({ success: true, message: 'P&L updated for all active portfolios' });
   } catch (error: any) {
     console.error('[API] P&L update error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/option-portfolios/:id/update-pnl
+ * Update P&L for a single portfolio (manual update button).
+ */
+router.post('/:id/update-pnl', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: 'Invalid portfolio ID' });
+    }
+
+    console.log(`[API] Updating P&L for portfolio #${id}...`);
+    await updatePortfolioPnl(id);
+    res.json({ success: true, message: `P&L updated for portfolio #${id}` });
+  } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
 });

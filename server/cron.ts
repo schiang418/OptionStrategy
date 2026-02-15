@@ -1,65 +1,60 @@
 import cron from 'node-cron';
-import { scrapeOptionSamurai } from './services/scraper.js';
-import {
-  saveScanResults,
-  scanExistsForDate,
-  createPortfoliosFromScan,
-  updateAllPortfolioPnl,
-} from './services/portfolio.js';
-import { getTodayET } from './utils/dates.js';
+
+const PORT = parseInt(process.env.PORT || '3000');
+const BASE = `http://localhost:${PORT}`;
 
 /**
- * Monday 9:30 AM ET (UTC 14:30): Run scan workflow
- * Scrape Option Samurai, save results, create portfolios.
+ * Helper: POST to a local API endpoint (SwingTrade pattern).
+ * Using localhost fetch keeps all logic in the route handlers.
  */
-const mondayScanJob = cron.schedule('30 14 * * 1', async () => {
-  console.log('[Cron] Monday scan workflow starting...');
-  const scanName = 'bi-weekly income all';
-  const scanDate = getTodayET();
+async function localPost(path: string): Promise<any> {
+  const res = await fetch(`${BASE}${path}`, { method: 'POST' });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`${path} responded ${res.status}: ${text}`);
+  }
+  return res.json();
+}
 
-  try {
-    // Check idempotency
-    const exists = await scanExistsForDate(scanDate, scanName);
-    if (exists) {
-      console.log(`[Cron] Scan already exists for ${scanDate}, skipping`);
-      return;
+/**
+ * Monday 9:30 AM ET: Run full Monday workflow.
+ * Calls the API endpoint which handles: market-day check, scan, portfolio creation.
+ */
+const mondayScanJob = cron.schedule(
+  '30 9 * * 1',
+  async () => {
+    console.log('[Cron] Monday scan workflow starting...');
+    try {
+      const result = await localPost('/api/option-automation/monday-workflow');
+      console.log('[Cron] Monday workflow result:', result.message);
+    } catch (error: any) {
+      console.error('[Cron] Monday scan error:', error.message);
     }
-
-    // Run scan
-    const results = await scrapeOptionSamurai(scanName);
-    const count = await saveScanResults(results, scanName, scanDate);
-    console.log(`[Cron] Saved ${count} scan results`);
-
-    // Create portfolios
-    const portfolios = await createPortfoliosFromScan(scanDate, scanName);
-    console.log(`[Cron] Created portfolios:`, portfolios);
-  } catch (error: any) {
-    console.error('[Cron] Monday scan error:', error.message);
-  }
-}, {
-  timezone: 'America/New_York',
-});
+  },
+  { timezone: 'America/New_York' },
+);
 
 /**
- * Daily 5:15 PM ET Mon-Fri (UTC 22:15): Update P&L
- * Get current option spread values and stock prices, check expirations, record value history.
+ * Daily 5:15 PM ET Mon-Fri: Update P&L for all active portfolios.
+ * Uses live Polygon data for option spreads and stock prices.
  */
-const dailyPnlJob = cron.schedule('15 22 * * 1-5', async () => {
-  console.log('[Cron] Daily P&L update starting...');
-
-  try {
-    await updateAllPortfolioPnl();
-    console.log('[Cron] Daily P&L update complete');
-  } catch (error: any) {
-    console.error('[Cron] Daily P&L update error:', error.message);
-  }
-}, {
-  timezone: 'America/New_York',
-});
+const dailyPnlJob = cron.schedule(
+  '15 17 * * 1-5',
+  async () => {
+    console.log('[Cron] Daily P&L update starting...');
+    try {
+      const result = await localPost('/api/option-portfolios/update-pnl');
+      console.log('[Cron] P&L update result:', result.message);
+    } catch (error: any) {
+      console.error('[Cron] Daily P&L update error:', error.message);
+    }
+  },
+  { timezone: 'America/New_York' },
+);
 
 export function startCronJobs() {
   console.log('[Cron] Starting cron jobs...');
-  console.log('[Cron]   Monday scan: 9:30 AM ET');
+  console.log('[Cron]   Monday scan:  9:30 AM ET');
   console.log('[Cron]   Daily P&L:   5:15 PM ET Mon-Fri');
   mondayScanJob.start();
   dailyPnlJob.start();

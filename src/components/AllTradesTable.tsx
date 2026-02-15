@@ -1,15 +1,22 @@
 import React, { useState, useMemo } from 'react';
+import type { Trade } from '../api';
 
 interface AllTradesTableProps {
-  trades: any[];
+  trades: Trade[];
 }
 
-type SortField = 'ticker' | 'expirationDate' | 'currentPnl' | 'status' | 'premiumCollected';
-type SortDir = 'asc' | 'desc';
+type SortKey = 'ticker' | 'expirationDate' | 'currentPnl' | 'status' | 'premiumCollected';
 
-function formatMoney(val: number | null | undefined): string {
-  if (val == null) return '$0.00';
-  return val < 0 ? `-$${Math.abs(val).toFixed(2)}` : `$${val.toFixed(2)}`;
+function fmtMoney(cents: number | null | undefined): string {
+  if (cents == null) return '$0.00';
+  const dollars = cents / 100;
+  return dollars < 0
+    ? `-$${Math.abs(dollars).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : `$${dollars.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function fmtStrike(cents: number): string {
+  return (cents / 100).toFixed(0);
 }
 
 function pnlColor(val: number | null | undefined): string {
@@ -25,14 +32,16 @@ function tradeStatusBadge(status: string) {
   };
   return (
     <span className={`px-2 py-0.5 rounded text-xs font-medium ${map[status] || 'bg-gray-600/20 text-gray-400'}`}>
-      {status.replace('_', ' ')}
+      {status.replace(/_/g, ' ')}
     </span>
   );
 }
 
 export default function AllTradesTable({ trades }: AllTradesTableProps) {
-  const [sortField, setSortField] = useState<SortField>('expirationDate');
-  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({
+    key: 'expirationDate',
+    dir: 'desc',
+  });
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterTicker, setFilterTicker] = useState('');
 
@@ -46,141 +55,139 @@ export default function AllTradesTable({ trades }: AllTradesTableProps) {
       list = list.filter(t => t.ticker.toLowerCase().includes(q));
     }
     list.sort((a, b) => {
-      let va = a[sortField];
-      let vb = b[sortField];
+      let va = (a as any)[sort.key] ?? '';
+      let vb = (b as any)[sort.key] ?? '';
       if (typeof va === 'string') va = va.toLowerCase();
       if (typeof vb === 'string') vb = vb.toLowerCase();
-      if (va < vb) return sortDir === 'asc' ? -1 : 1;
-      if (va > vb) return sortDir === 'asc' ? 1 : -1;
+      if (va < vb) return sort.dir === 'asc' ? -1 : 1;
+      if (va > vb) return sort.dir === 'asc' ? 1 : -1;
       return 0;
     });
     return list;
-  }, [trades, sortField, sortDir, filterStatus, filterTicker]);
+  }, [trades, sort, filterStatus, filterTicker]);
 
-  function handleSort(field: SortField) {
-    if (sortField === field) {
-      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+  const handleSort = (key: SortKey) => {
+    if (sort.key === key) {
+      setSort({ key, dir: sort.dir === 'asc' ? 'desc' : 'asc' });
     } else {
-      setSortField(field);
-      setSortDir('asc');
+      setSort({ key, dir: key === 'ticker' ? 'asc' : 'desc' });
     }
-  }
-
-  const sortArrow = (field: SortField) => {
-    if (sortField !== field) return '';
-    return sortDir === 'asc' ? ' ↑' : ' ↓';
   };
 
-  if (trades.length === 0) return null;
+  const SortHeader = ({ label, sortKey, className }: { label: string; sortKey: SortKey; className?: string }) => (
+    <th
+      onClick={() => handleSort(sortKey)}
+      className={`px-3 py-3 text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide
+        cursor-pointer hover:text-[#4f8ff7] whitespace-nowrap border-b border-[#2a2e3a] select-none ${className || 'text-left'}`}
+    >
+      {label}
+      {sort.key === sortKey && (sort.dir === 'asc' ? ' \u25B2' : ' \u25BC')}
+    </th>
+  );
+
+  if (trades.length === 0) {
+    return (
+      <div className="bg-[#1a1d27] border border-[#2a2e3a] rounded-xl p-6 text-center">
+        <p className="text-[#8b8fa3]">No trades yet. Run a scan to create portfolios with trades.</p>
+      </div>
+    );
+  }
 
   return (
-    <section className="bg-[#161822] rounded-lg p-6 border border-gray-800">
-      <h2 className="text-xl font-semibold mb-4">All Trades</h2>
-
+    <div>
+      {/* Filters */}
       <div className="flex items-center gap-4 mb-4">
         <input
           type="text"
           placeholder="Filter by ticker..."
           value={filterTicker}
-          onChange={e => setFilterTicker(e.target.value)}
-          className="bg-[#0f1117] border border-gray-700 rounded px-3 py-1.5 text-sm w-48"
+          onChange={(e) => setFilterTicker(e.target.value)}
+          className="bg-[#1a1d27] border border-[#2a2e3a] rounded-lg px-3 py-2 text-sm w-48
+            focus:outline-none focus:border-[#4f8ff7]"
         />
         <select
           value={filterStatus}
-          onChange={e => setFilterStatus(e.target.value)}
-          className="bg-[#0f1117] border border-gray-700 rounded px-3 py-1.5 text-sm"
+          onChange={(e) => setFilterStatus(e.target.value)}
+          className="bg-[#1a1d27] border border-[#2a2e3a] rounded-lg px-3 py-2 text-sm
+            focus:outline-none focus:border-[#4f8ff7]"
         >
           <option value="all">All statuses</option>
           <option value="open">Open</option>
           <option value="expired_profit">Expired Profit</option>
           <option value="expired_loss">Expired Loss</option>
         </select>
-        <span className="text-sm text-gray-400">{filtered.length} trades</span>
+        <span className="text-sm text-[#8b8fa3]">{filtered.length} trades</span>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-gray-400 border-b border-gray-700">
-              <th
-                className="text-left py-2 px-3 cursor-pointer hover:text-white"
-                onClick={() => handleSort('ticker')}
-              >
-                Ticker{sortArrow('ticker')}
+      {/* Table */}
+      <div className="overflow-x-auto rounded-xl border border-[#2a2e3a]">
+        <table className="w-full text-[13px] border-collapse">
+          <thead className="bg-[#1a1d27] sticky top-0 z-10">
+            <tr>
+              <SortHeader label="Ticker" sortKey="ticker" />
+              <th className="px-3 py-3 text-left text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide border-b border-[#2a2e3a]">
+                Portfolio
               </th>
-              <th className="text-left py-2 px-3">Portfolio</th>
-              <th className="text-left py-2 px-3">Strikes</th>
-              <th
-                className="text-left py-2 px-3 cursor-pointer hover:text-white"
-                onClick={() => handleSort('expirationDate')}
-              >
-                Expiration{sortArrow('expirationDate')}
+              <th className="px-3 py-3 text-left text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide border-b border-[#2a2e3a]">
+                Strikes
               </th>
-              <th className="text-right py-2 px-3">Contracts</th>
-              <th
-                className="text-right py-2 px-3 cursor-pointer hover:text-white"
-                onClick={() => handleSort('premiumCollected')}
-              >
-                Premium{sortArrow('premiumCollected')}
+              <SortHeader label="Expiration" sortKey="expirationDate" />
+              <th className="px-3 py-3 text-right text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide border-b border-[#2a2e3a]">
+                Ctrs
               </th>
-              <th className="text-right py-2 px-3">Entry Price</th>
-              <th className="text-right py-2 px-3">Cur Price</th>
-              <th
-                className="text-right py-2 px-3 cursor-pointer hover:text-white"
-                onClick={() => handleSort('currentPnl')}
-              >
-                P&L{sortArrow('currentPnl')}
+              <SortHeader label="Premium" sortKey="premiumCollected" className="text-right" />
+              <th className="px-3 py-3 text-right text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide border-b border-[#2a2e3a]">
+                Entry
               </th>
-              <th
-                className="text-center py-2 px-3 cursor-pointer hover:text-white"
-                onClick={() => handleSort('status')}
-              >
-                Status{sortArrow('status')}
+              <th className="px-3 py-3 text-right text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide border-b border-[#2a2e3a]">
+                Current
               </th>
+              <SortHeader label="P&L" sortKey="currentPnl" className="text-right" />
+              <SortHeader label="Status" sortKey="status" className="text-center" />
             </tr>
           </thead>
           <tbody>
-            {filtered.map((t: any) => (
+            {filtered.map((t) => (
               <tr
                 key={`${t.id}-${t.portfolioId}`}
-                className={`border-b border-gray-800/50 hover:bg-[#1a1c2e] ${
+                className={`hover:bg-[#242836] transition-colors border-b border-[#2a2e3a]/50 ${
                   t.isItm ? 'bg-yellow-900/10' : ''
                 }`}
               >
-                <td className="py-2 px-3 font-medium text-white">
+                <td className="px-3 py-2 font-bold font-mono">
                   {t.ticker}
-                  {t.isItm ? (
+                  {t.isItm && (
                     <span className="ml-1 text-yellow-400 text-[10px]">ITM</span>
-                  ) : null}
+                  )}
                 </td>
-                <td className="py-2 px-3 text-gray-400 text-xs">
+                <td className="px-3 py-2 text-[#8b8fa3] text-xs">
                   {t.portfolioType === 'top_return' ? 'Return' : 'Prob'}
                   <br />
                   {t.portfolioScanDate}
                 </td>
-                <td className="py-2 px-3">
-                  {t.sellStrike}/{t.buyStrike}
+                <td className="px-3 py-2 font-mono text-[#8b8fa3]">
+                  {fmtStrike(t.sellStrike)}/{fmtStrike(t.buyStrike)}
                 </td>
-                <td className="py-2 px-3">{t.expirationDate}</td>
-                <td className="py-2 px-3 text-right">{t.contracts}</td>
-                <td className="py-2 px-3 text-right text-green-400">
-                  {formatMoney(t.premiumCollected)}
+                <td className="px-3 py-2">{t.expirationDate}</td>
+                <td className="px-3 py-2 text-right">{t.contracts}</td>
+                <td className="px-3 py-2 text-right text-green-400">
+                  {fmtMoney(t.premiumCollected * t.contracts)}
                 </td>
-                <td className="py-2 px-3 text-right">
-                  {t.stockPriceAtEntry ? `$${t.stockPriceAtEntry.toFixed(2)}` : '-'}
+                <td className="px-3 py-2 text-right">
+                  {t.stockPriceAtEntry ? fmtMoney(t.stockPriceAtEntry) : '-'}
                 </td>
-                <td className="py-2 px-3 text-right">
-                  {t.currentStockPrice ? `$${t.currentStockPrice.toFixed(2)}` : '-'}
+                <td className="px-3 py-2 text-right">
+                  {t.currentStockPrice ? fmtMoney(t.currentStockPrice) : '-'}
                 </td>
-                <td className={`py-2 px-3 text-right font-medium ${pnlColor(t.currentPnl)}`}>
-                  {formatMoney(t.currentPnl)}
+                <td className={`px-3 py-2 text-right font-medium ${pnlColor(t.currentPnl)}`}>
+                  {fmtMoney(t.currentPnl)}
                 </td>
-                <td className="py-2 px-3 text-center">{tradeStatusBadge(t.status)}</td>
+                <td className="px-3 py-2 text-center">{tradeStatusBadge(t.status)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-    </section>
+    </div>
   );
 }

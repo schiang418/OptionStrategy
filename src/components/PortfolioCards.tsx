@@ -1,13 +1,23 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { RefreshCw } from 'lucide-react';
+import { updatePortfolioPnl, type Portfolio, type PortfolioWithTrades } from '../api';
 
 interface PortfolioCardsProps {
-  portfolios: any[];
-  portfolioDetails: Record<number, any>;
+  portfolios: Portfolio[];
+  portfolioDetails: Record<number, PortfolioWithTrades>;
+  onRefresh: () => void;
 }
 
-function formatMoney(val: number | null | undefined): string {
-  if (val == null) return '$0.00';
-  return val < 0 ? `-$${Math.abs(val).toFixed(2)}` : `$${val.toFixed(2)}`;
+function fmtMoney(cents: number | null | undefined): string {
+  if (cents == null) return '$0.00';
+  const dollars = cents / 100;
+  return dollars < 0
+    ? `-$${Math.abs(dollars).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : `$${dollars.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function fmtStrike(cents: number): string {
+  return (cents / 100).toFixed(0);
 }
 
 function pnlColor(val: number | null | undefined): string {
@@ -16,10 +26,9 @@ function pnlColor(val: number | null | undefined): string {
 }
 
 function statusBadge(status: string) {
-  const colors =
-    status === 'active'
-      ? 'bg-green-600/20 text-green-400'
-      : 'bg-gray-600/20 text-gray-400';
+  const colors = status === 'active'
+    ? 'bg-green-600/20 text-green-400'
+    : 'bg-gray-600/20 text-gray-400';
   return (
     <span className={`px-2 py-0.5 rounded text-xs font-medium ${colors}`}>
       {status}
@@ -35,44 +44,77 @@ function tradeStatusBadge(status: string) {
   };
   return (
     <span className={`px-2 py-0.5 rounded text-xs font-medium ${map[status] || 'bg-gray-600/20 text-gray-400'}`}>
-      {status.replace('_', ' ')}
+      {status.replace(/_/g, ' ')}
     </span>
   );
 }
 
-function PortfolioCard({ portfolio, detail }: { portfolio: any; detail: any }) {
+function PortfolioCard({
+  portfolio,
+  detail,
+  onRefresh,
+}: {
+  portfolio: Portfolio;
+  detail: PortfolioWithTrades | undefined;
+  onRefresh: () => void;
+}) {
   const trades = detail?.trades || [];
   const typeLabel = portfolio.type === 'top_return' ? 'Top Return' : 'Top Probability';
   const pnlPct = portfolio.initialCapital
     ? ((portfolio.netPnl / portfolio.initialCapital) * 100).toFixed(2)
     : '0.00';
 
+  const [updating, setUpdating] = useState(false);
+
+  const handleUpdate = async () => {
+    setUpdating(true);
+    try {
+      await updatePortfolioPnl(portfolio.id);
+      onRefresh();
+    } catch {}
+    setUpdating(false);
+  };
+
   return (
-    <div className="bg-[#161822] rounded-lg border border-gray-800 overflow-hidden">
-      <div className="p-4 border-b border-gray-800">
+    <div className="bg-[#1a1d27] rounded-xl border border-[#2a2e3a] overflow-hidden">
+      <div className="p-4 border-b border-[#2a2e3a]">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-lg font-semibold">{typeLabel}</h3>
-          {statusBadge(portfolio.status)}
+          <div className="flex items-center gap-2">
+            {statusBadge(portfolio.status)}
+            {portfolio.status === 'active' && (
+              <button
+                onClick={handleUpdate}
+                disabled={updating}
+                className="p-1 rounded hover:bg-[#242836] transition-colors disabled:opacity-50"
+                title="Update P&L"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-[#8b8fa3] ${updating ? 'animate-spin' : ''}`} />
+              </button>
+            )}
+          </div>
         </div>
-        <div className="text-sm text-gray-400 mb-3">
-          Scan: {portfolio.scanDate}
-        </div>
-        <div className="grid grid-cols-3 gap-4 text-sm">
-          <div>
-            <div className="text-gray-400">Premium</div>
-            <div className="text-green-400 font-medium">
-              {formatMoney(portfolio.totalPremiumCollected)}
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="bg-[#0f1117] border border-[#2a2e3a] rounded-lg p-3">
+            <div className="text-xs text-[#8b8fa3] mb-1">Initial Capital</div>
+            <div className="text-sm font-bold">{fmtMoney(portfolio.initialCapital)}</div>
+          </div>
+          <div className="bg-[#0f1117] border border-[#2a2e3a] rounded-lg p-3">
+            <div className="text-xs text-[#8b8fa3] mb-1">Premium Collected</div>
+            <div className="text-sm font-bold text-green-400">
+              {fmtMoney(portfolio.totalPremiumCollected)}
             </div>
           </div>
-          <div>
-            <div className="text-gray-400">Current P&L</div>
-            <div className={`font-medium ${pnlColor(portfolio.netPnl)}`}>
-              {formatMoney(portfolio.netPnl)}
+          <div className="bg-[#0f1117] border border-[#2a2e3a] rounded-lg p-3">
+            <div className="text-xs text-[#8b8fa3] mb-1">Net P&L</div>
+            <div className={`text-sm font-bold ${pnlColor(portfolio.netPnl)}`}>
+              {fmtMoney(portfolio.netPnl)}
             </div>
           </div>
-          <div>
-            <div className="text-gray-400">P&L %</div>
-            <div className={`font-medium ${pnlColor(portfolio.netPnl)}`}>
+          <div className="bg-[#0f1117] border border-[#2a2e3a] rounded-lg p-3">
+            <div className="text-xs text-[#8b8fa3] mb-1">Return</div>
+            <div className={`text-sm font-bold ${pnlColor(portfolio.netPnl)}`}>
               {pnlPct}%
             </div>
           </div>
@@ -81,48 +123,50 @@ function PortfolioCard({ portfolio, detail }: { portfolio: any; detail: any }) {
 
       {trades.length > 0 && (
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+          <table className="w-full text-[12px]">
             <thead>
-              <tr className="text-gray-400 border-b border-gray-800">
-                <th className="text-left py-2 px-3">Ticker</th>
-                <th className="text-left py-2 px-3">Strikes</th>
-                <th className="text-left py-2 px-3">Exp</th>
-                <th className="text-right py-2 px-3">Ctrs</th>
-                <th className="text-right py-2 px-3">Premium</th>
-                <th className="text-right py-2 px-3">Cur Value</th>
-                <th className="text-right py-2 px-3">P&L</th>
-                <th className="text-center py-2 px-3">Status</th>
+              <tr className="border-b border-[#2a2e3a]">
+                <th className="px-3 py-2 text-left text-xs text-[#8b8fa3] font-semibold">Ticker</th>
+                <th className="px-3 py-2 text-left text-xs text-[#8b8fa3] font-semibold">Strikes</th>
+                <th className="px-3 py-2 text-left text-xs text-[#8b8fa3] font-semibold">Exp</th>
+                <th className="px-3 py-2 text-right text-xs text-[#8b8fa3] font-semibold">Ctrs</th>
+                <th className="px-3 py-2 text-right text-xs text-[#8b8fa3] font-semibold">Premium</th>
+                <th className="px-3 py-2 text-right text-xs text-[#8b8fa3] font-semibold">Spread Val</th>
+                <th className="px-3 py-2 text-right text-xs text-[#8b8fa3] font-semibold">P&L</th>
+                <th className="px-3 py-2 text-center text-xs text-[#8b8fa3] font-semibold">Status</th>
               </tr>
             </thead>
             <tbody>
-              {trades.map((t: any) => (
+              {trades.map((t) => (
                 <tr
                   key={t.id}
-                  className={`border-b border-gray-800/50 hover:bg-[#1a1c2e] ${
+                  className={`border-b border-[#2a2e3a]/50 hover:bg-[#242836] ${
                     t.isItm ? 'bg-yellow-900/10' : ''
                   }`}
                 >
-                  <td className="py-1.5 px-3 font-medium text-white">
+                  <td className="px-3 py-1.5 font-bold font-mono">
                     {t.ticker}
-                    {t.isItm ? (
+                    {t.isItm && (
                       <span className="ml-1 text-yellow-400 text-[10px]">ITM</span>
-                    ) : null}
+                    )}
                   </td>
-                  <td className="py-1.5 px-3">
-                    {t.sellStrike}/{t.buyStrike}
+                  <td className="px-3 py-1.5 font-mono text-[#8b8fa3]">
+                    {fmtStrike(t.sellStrike)}/{fmtStrike(t.buyStrike)}
                   </td>
-                  <td className="py-1.5 px-3">{t.expirationDate}</td>
-                  <td className="py-1.5 px-3 text-right">{t.contracts}</td>
-                  <td className="py-1.5 px-3 text-right text-green-400">
-                    {formatMoney(t.premiumCollected)}
+                  <td className="px-3 py-1.5">{t.expirationDate}</td>
+                  <td className="px-3 py-1.5 text-right">{t.contracts}</td>
+                  <td className="px-3 py-1.5 text-right text-green-400">
+                    {fmtMoney(t.premiumCollected * t.contracts)}
                   </td>
-                  <td className="py-1.5 px-3 text-right">
-                    {formatMoney(t.currentSpreadValue)}
+                  <td className="px-3 py-1.5 text-right">
+                    {t.currentSpreadValue != null
+                      ? fmtMoney(t.currentSpreadValue * t.contracts)
+                      : '-'}
                   </td>
-                  <td className={`py-1.5 px-3 text-right font-medium ${pnlColor(t.currentPnl)}`}>
-                    {formatMoney(t.currentPnl)}
+                  <td className={`px-3 py-1.5 text-right font-medium ${pnlColor(t.currentPnl)}`}>
+                    {fmtMoney(t.currentPnl)}
                   </td>
-                  <td className="py-1.5 px-3 text-center">
+                  <td className="px-3 py-1.5 text-center">
                     {tradeStatusBadge(t.status)}
                   </td>
                 </tr>
@@ -135,36 +179,27 @@ function PortfolioCard({ portfolio, detail }: { portfolio: any; detail: any }) {
   );
 }
 
-export default function PortfolioCards({ portfolios, portfolioDetails }: PortfolioCardsProps) {
+export default function PortfolioCards({ portfolios, portfolioDetails, onRefresh }: PortfolioCardsProps) {
   if (portfolios.length === 0) {
-    return null;
-  }
-
-  // Group by scan date
-  const grouped: Record<string, any[]> = {};
-  for (const p of portfolios) {
-    const key = p.scanDate;
-    if (!grouped[key]) grouped[key] = [];
-    grouped[key].push(p);
+    return (
+      <div className="bg-[#1a1d27] border border-[#2a2e3a] rounded-xl p-6 text-center mb-6">
+        <p className="text-[#8b8fa3]">
+          No portfolios for this scan date. Portfolios are created automatically when a scan runs.
+        </p>
+      </div>
+    );
   }
 
   return (
-    <section>
-      <h2 className="text-xl font-semibold mb-4">Portfolios</h2>
-      {Object.entries(grouped).map(([scanDate, group]) => (
-        <div key={scanDate} className="mb-6">
-          <h3 className="text-sm text-gray-400 mb-3">Scan Date: {scanDate}</h3>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {group.map(p => (
-              <PortfolioCard
-                key={p.id}
-                portfolio={p}
-                detail={portfolioDetails[p.id]}
-              />
-            ))}
-          </div>
-        </div>
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+      {portfolios.map((p) => (
+        <PortfolioCard
+          key={p.id}
+          portfolio={p}
+          detail={portfolioDetails[p.id]}
+          onRefresh={onRefresh}
+        />
       ))}
-    </section>
+    </div>
   );
 }

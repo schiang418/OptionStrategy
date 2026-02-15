@@ -1,9 +1,16 @@
 import puppeteer, { type Browser, type Page } from 'puppeteer';
-import { parseExpirationDate } from '../utils/dates.js';
+import fs from 'fs';
+import path from 'path';
+import { parseExpirationDate, sleep } from '../utils/dates.js';
 import type { ScanResultRow } from '../../shared/types.js';
 
 const OPTION_SAMURAI_URL = 'https://app.optionsamurai.com';
 const LOGIN_URL = `${OPTION_SAMURAI_URL}/login`;
+const DATA_DIR = process.env.DATA_DIR || '/data';
+
+// ---------------------------------------------------------------------------
+// Browser launch config
+// ---------------------------------------------------------------------------
 
 function getLaunchOptions() {
   const args = [
@@ -15,22 +22,24 @@ function getLaunchOptions() {
     '--window-size=1920,1080',
   ];
 
-  // Check for system-installed Chromium
-  const chromiumPaths = [
-    '/usr/bin/chromium',
-    '/usr/bin/chromium-browser',
-    '/usr/bin/google-chrome',
-  ];
+  // Priority: env var > system chromium > bundled puppeteer
+  let executablePath: string | undefined =
+    process.env.PUPPETEER_EXECUTABLE_PATH;
 
-  let executablePath: string | undefined;
-  for (const p of chromiumPaths) {
-    try {
-      const fs = require('fs');
-      if (fs.existsSync(p)) {
-        executablePath = p;
-        break;
-      }
-    } catch {}
+  if (!executablePath) {
+    const chromiumPaths = [
+      '/usr/bin/chromium',
+      '/usr/bin/chromium-browser',
+      '/usr/bin/google-chrome',
+    ];
+    for (const p of chromiumPaths) {
+      try {
+        if (fs.existsSync(p)) {
+          executablePath = p;
+          break;
+        }
+      } catch {}
+    }
   }
 
   return {
@@ -40,15 +49,69 @@ function getLaunchOptions() {
   };
 }
 
-/**
- * Test login to Option Samurai. Returns true if login succeeds.
- */
+// ---------------------------------------------------------------------------
+// Screenshot helper
+// ---------------------------------------------------------------------------
+
+async function takeScreenshot(page: Page, label: string): Promise<string | null> {
+  try {
+    const dir = fs.existsSync(DATA_DIR) ? DATA_DIR : '/tmp';
+    const filePath = path.join(dir, `scraper-error-${label}-${Date.now()}.png`);
+    await page.screenshot({ path: filePath, fullPage: true });
+    console.log(`[Scraper] Screenshot saved: ${filePath}`);
+    return filePath;
+  } catch (err: any) {
+    console.error(`[Scraper] Failed to take screenshot: ${err.message}`);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Flexible selector helpers
+// ---------------------------------------------------------------------------
+
+async function findAndType(page: Page, selectors: string[], text: string): Promise<void> {
+  for (const sel of selectors) {
+    try {
+      const el = await page.$(sel);
+      if (el) {
+        await el.type(text);
+        return;
+      }
+    } catch {}
+  }
+  // Last resort: wait for the first selector
+  await page.waitForSelector(selectors[0], { timeout: 10000 });
+  await page.type(selectors[0], text);
+}
+
+async function findAndClick(page: Page, selectors: string[]): Promise<void> {
+  for (const sel of selectors) {
+    try {
+      const el = await page.$(sel);
+      if (el) {
+        await el.click();
+        return;
+      }
+    } catch {}
+  }
+  await page.waitForSelector(selectors[0], { timeout: 10000 });
+  await page.click(selectors[0]);
+}
+
+// ---------------------------------------------------------------------------
+// testLogin
+// ---------------------------------------------------------------------------
+
 export async function testLogin(): Promise<{ success: boolean; message: string }> {
   const email = process.env.OPTION_SAMURAI_EMAIL;
   const password = process.env.OPTION_SAMURAI_PASSWORD;
 
   if (!email || !password) {
-    return { success: false, message: 'Missing OPTION_SAMURAI_EMAIL or OPTION_SAMURAI_PASSWORD environment variables' };
+    return {
+      success: false,
+      message: 'Missing OPTION_SAMURAI_EMAIL or OPTION_SAMURAI_PASSWORD environment variables',
+    };
   }
 
   let browser: Browser | null = null;
@@ -59,13 +122,22 @@ export async function testLogin(): Promise<{ success: boolean; message: string }
 
     await page.goto(LOGIN_URL, { waitUntil: 'networkidle2', timeout: 30000 });
 
-    // Fill login form
-    await page.waitForSelector('input[type="email"], input[name="email"]', { timeout: 10000 });
-    await page.type('input[type="email"], input[name="email"]', email);
-    await page.type('input[type="password"], input[name="password"]', password);
+    await findAndType(
+      page,
+      ['input[type="email"]', 'input[name="email"]', '#email'],
+      email,
+    );
+    await findAndType(
+      page,
+      ['input[type="password"]', 'input[name="password"]', '#password'],
+      password,
+    );
 
-    // Submit
-    await page.click('button[type="submit"]');
+    await findAndClick(page, [
+      'button[type="submit"]',
+      'button.login-button',
+      'input[type="submit"]',
+    ]);
     await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 });
 
     const url = page.url();
@@ -82,11 +154,19 @@ export async function testLogin(): Promise<{ success: boolean; message: string }
   }
 }
 
+// ---------------------------------------------------------------------------
+// scrapeOptionSamurai
+// ---------------------------------------------------------------------------
+
 /**
  * Scrape Option Samurai for the named scan results.
+ *
+ * Returns raw float values (dollars, percentages as plain numbers like 13.57
+ * for 13.57%). The portfolio service is responsible for converting to
+ * cents / basis points before database insertion.
  */
 export async function scrapeOptionSamurai(
-  scanName: string = 'bi-weekly income all'
+  scanName: string = 'bi-weekly income all',
 ): Promise<ScanResultRow[]> {
   const email = process.env.OPTION_SAMURAI_EMAIL;
   const password = process.env.OPTION_SAMURAI_PASSWORD;
@@ -102,30 +182,47 @@ export async function scrapeOptionSamurai(
     const page = await browser.newPage();
     await page.setViewport({ width: 1920, height: 1080 });
 
-    // Login
+    // ---- Login ----
     console.log('[Scraper] Navigating to login page...');
     await page.goto(LOGIN_URL, { waitUntil: 'networkidle2', timeout: 30000 });
 
-    await page.waitForSelector('input[type="email"], input[name="email"]', { timeout: 10000 });
-    await page.type('input[type="email"], input[name="email"]', email);
-    await page.type('input[type="password"], input[name="password"]', password);
-    await page.click('button[type="submit"]');
+    await findAndType(
+      page,
+      ['input[type="email"]', 'input[name="email"]', '#email'],
+      email,
+    );
+    await findAndType(
+      page,
+      ['input[type="password"]', 'input[name="password"]', '#password'],
+      password,
+    );
+
+    await findAndClick(page, [
+      'button[type="submit"]',
+      'button.login-button',
+      'input[type="submit"]',
+    ]);
     await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 });
 
     if (page.url().includes('/login')) {
+      await takeScreenshot(page, 'login-failed');
       throw new Error('Login failed - still on login page');
     }
     console.log('[Scraper] Login successful');
 
-    // Navigate to Scans page
+    // ---- Navigate to Scans page ----
     console.log('[Scraper] Navigating to scans...');
-    await page.goto(`${OPTION_SAMURAI_URL}/scans`, { waitUntil: 'networkidle2', timeout: 30000 });
+    await page.goto(`${OPTION_SAMURAI_URL}/scans`, {
+      waitUntil: 'networkidle2',
+      timeout: 30000,
+    });
 
-    // Find and click the saved scan
+    // ---- Find and click the saved scan ----
     console.log(`[Scraper] Looking for scan: "${scanName}"...`);
-    await page.waitForSelector('table, .scan-list, [class*="scan"]', { timeout: 15000 });
+    await page.waitForSelector('table, .scan-list, [class*="scan"]', {
+      timeout: 15000,
+    });
 
-    // Click on the scan by name
     const scanClicked = await page.evaluate((name: string) => {
       const elements = document.querySelectorAll('a, button, td, span, div');
       for (const el of elements) {
@@ -138,13 +235,15 @@ export async function scrapeOptionSamurai(
     }, scanName);
 
     if (!scanClicked) {
+      await takeScreenshot(page, 'scan-not-found');
       throw new Error(`Could not find scan named "${scanName}"`);
     }
 
-    // Wait for results to load
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // Wait for results table to load
+    await sleep(5000);
     await page.waitForSelector('table', { timeout: 15000 });
 
+    // ---- Parse the results table ----
     console.log('[Scraper] Parsing results table...');
     const results = await page.evaluate(() => {
       const rows: any[] = [];
@@ -153,7 +252,7 @@ export async function scrapeOptionSamurai(
       // Find the results table (usually the largest one)
       let resultsTable: HTMLTableElement | null = null;
       let maxRows = 0;
-      tables.forEach(table => {
+      tables.forEach((table) => {
         const rowCount = table.querySelectorAll('tbody tr').length;
         if (rowCount > maxRows) {
           maxRows = rowCount;
@@ -165,68 +264,90 @@ export async function scrapeOptionSamurai(
 
       // Get header texts to map columns
       const headers: string[] = [];
-      (resultsTable as HTMLTableElement).querySelectorAll('thead th').forEach(th => {
-        headers.push((th.textContent || '').trim().toLowerCase());
-      });
+      (resultsTable as HTMLTableElement)
+        .querySelectorAll('thead th')
+        .forEach((th) => {
+          headers.push((th.textContent || '').trim().toLowerCase());
+        });
 
       // Parse each row
-      (resultsTable as HTMLTableElement).querySelectorAll('tbody tr').forEach(tr => {
-        const cells: string[] = [];
-        tr.querySelectorAll('td').forEach(td => {
-          cells.push((td.textContent || '').trim());
+      (resultsTable as HTMLTableElement)
+        .querySelectorAll('tbody tr')
+        .forEach((tr) => {
+          const cells: string[] = [];
+          tr.querySelectorAll('td').forEach((td) => {
+            cells.push((td.textContent || '').trim());
+          });
+
+          if (cells.length < 5) return;
+
+          const getCol = (keywords: string[]): string => {
+            for (const kw of keywords) {
+              const idx = headers.findIndex((h) => h.includes(kw));
+              if (idx >= 0 && idx < cells.length) return cells[idx];
+            }
+            return '';
+          };
+
+          const parseNum = (s: string): number => {
+            const cleaned = s.replace(/[%$,]/g, '').trim();
+            return parseFloat(cleaned) || 0;
+          };
+
+          rows.push({
+            ticker: getCol(['ticker', 'symbol']),
+            companyName: getCol(['company', 'name']),
+            price: parseNum(getCol(['price'])),
+            priceChange: parseNum(getCol(['change'])),
+            ivRank: parseNum(getCol(['iv rank'])),
+            ivPercentile: parseNum(getCol(['iv percentile', 'iv %'])),
+            strike: getCol(['strike']),
+            moneyness: parseNum(getCol(['moneyness', 'money'])),
+            expDate: getCol(['exp', 'expiration', 'expiry']),
+            daysToExp: parseInt(getCol(['days', 'dte'])) || 0,
+            totalOptVol:
+              parseInt(getCol(['vol', 'volume']).replace(/,/g, '')) || 0,
+            probMaxProfit: parseNum(getCol(['prob', 'probability'])),
+            maxProfit: parseNum(getCol(['max profit', 'profit'])),
+            maxLoss: parseNum(getCol(['max loss', 'loss'])),
+            returnPercent: parseNum(getCol(['return', 'ret'])),
+          });
         });
-
-        if (cells.length < 5) return;
-
-        // Map columns by header names
-        const getCol = (keywords: string[]): string => {
-          for (const kw of keywords) {
-            const idx = headers.findIndex(h => h.includes(kw));
-            if (idx >= 0 && idx < cells.length) return cells[idx];
-          }
-          return '';
-        };
-
-        const parseNum = (s: string): number => {
-          const cleaned = s.replace(/[%$,]/g, '').trim();
-          return parseFloat(cleaned) || 0;
-        };
-
-        rows.push({
-          ticker: getCol(['ticker', 'symbol']),
-          companyName: getCol(['company', 'name']),
-          price: parseNum(getCol(['price'])),
-          priceChange: parseNum(getCol(['change'])),
-          ivRank: parseNum(getCol(['iv rank'])),
-          ivPercentile: parseNum(getCol(['iv percentile', 'iv %'])),
-          strike: getCol(['strike']),
-          moneyness: parseNum(getCol(['moneyness', 'money'])),
-          expDate: getCol(['exp', 'expiration', 'expiry']),
-          daysToExp: parseInt(getCol(['days', 'dte'])) || 0,
-          totalOptVol: parseInt(getCol(['vol', 'volume']).replace(/,/g, '')) || 0,
-          probMaxProfit: parseNum(getCol(['prob', 'probability'])),
-          maxProfit: parseNum(getCol(['max profit', 'profit'])),
-          maxLoss: parseNum(getCol(['max loss', 'loss'])),
-          returnPercent: parseNum(getCol(['return', 'ret'])),
-        });
-      });
 
       return rows;
     });
 
     console.log(`[Scraper] Found ${results.length} results`);
 
-    // Parse expiration dates
+    // Parse expiration dates into YYYY-MM-DD; return raw float values
     const parsed: ScanResultRow[] = results
       .filter((r: any) => r.ticker)
-      .map((r: any) => ({
-        ...r,
-        expDate: r.expDate ? parseExpirationDate(r.expDate) : '',
-      }));
+      .map((r: any) => {
+        let expDate = '';
+        if (r.expDate) {
+          try {
+            expDate = parseExpirationDate(r.expDate);
+          } catch (e: any) {
+            console.warn(
+              `[Scraper] Could not parse expDate "${r.expDate}": ${e.message}`,
+            );
+          }
+        }
+        return { ...r, expDate } as ScanResultRow;
+      });
 
     return parsed;
   } catch (error: any) {
     console.error('[Scraper] Error:', error.message);
+    // Take screenshot on any error
+    if (browser) {
+      try {
+        const pages = await browser.pages();
+        if (pages.length > 0) {
+          await takeScreenshot(pages[pages.length - 1], 'error');
+        }
+      } catch {}
+    }
     throw error;
   } finally {
     if (browser) await browser.close();

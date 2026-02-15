@@ -44,38 +44,23 @@ def main():
     chrome_options = Options()
     chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-setuid-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--disable-software-rasterizer")
-    chrome_options.add_argument("--window-size=1920,1080")
-    chrome_options.add_argument("--disable-extensions")
-    chrome_options.add_argument("--single-process")
-    chrome_options.add_argument("--dns-prefetch-disable")
-
-    # Use system chromium
-    chromium_path = os.environ.get("PUPPETEER_EXECUTABLE_PATH") or os.environ.get("CHROMIUM_PATH")
-    if not chromium_path:
-        for p in ["/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/google-chrome"]:
-            if os.path.exists(p):
-                chromium_path = p
-                break
-
-    if chromium_path:
-        chrome_options.binary_location = chromium_path
-
-    # ChromeDriver path
-    driver_path = None
-    for p in ["/usr/bin/chromedriver", "/usr/lib/chromium/chromedriver"]:
-        if os.path.exists(p):
-            driver_path = p
-            break
+    chrome_options.add_argument("--window-size=1920,1200")
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option("useAutomationExtension", False)
 
     driver = None
     try:
         log("Launching browser...")
-        service_kwargs = {"service": Service(executable_path=driver_path)} if driver_path else {}
-        driver = webdriver.Chrome(options=chrome_options, **service_kwargs)
+        try:
+            driver = webdriver.Chrome(options=chrome_options)
+        except Exception:
+            service = Service("/usr/bin/chromedriver")
+            driver = webdriver.Chrome(service=service, options=chrome_options)
         driver.set_page_load_timeout(30)
         wait = WebDriverWait(driver, 15)
 

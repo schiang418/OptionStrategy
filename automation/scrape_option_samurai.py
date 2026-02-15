@@ -50,7 +50,8 @@ def main():
     chrome_options.add_argument("--disable-software-rasterizer")
     chrome_options.add_argument("--window-size=1920,1080")
     chrome_options.add_argument("--disable-extensions")
-    chrome_options.add_argument("--disable-background-networking")
+    chrome_options.add_argument("--single-process")
+    chrome_options.add_argument("--dns-prefetch-disable")
 
     # Use system chromium
     chromium_path = os.environ.get("PUPPETEER_EXECUTABLE_PATH") or os.environ.get("CHROMIUM_PATH")

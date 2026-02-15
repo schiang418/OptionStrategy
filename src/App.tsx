@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, RefreshCw, Loader2, BarChart3, TrendingUp, List } from 'lucide-react';
+import { ChevronLeft, ChevronRight, RefreshCw, Loader2, BarChart3, TrendingUp, List, Lock } from 'lucide-react';
 import {
   fetchScanDates,
   fetchScanResults,
@@ -14,6 +14,7 @@ import {
   type PortfolioWithTrades,
   type Trade,
 } from './api';
+import { STRATEGIES, DEFAULT_STRATEGY, type Strategy } from './strategies';
 import ScanResultsPanel from './components/ScanResultsPanel';
 import PortfolioCards from './components/PortfolioCards';
 import PerformanceChart from './components/PerformanceChart';
@@ -28,6 +29,7 @@ const TAB_LABELS: Record<ViewTab, string> = {
 };
 
 export default function App() {
+  const [strategy, setStrategy] = useState<Strategy>(DEFAULT_STRATEGY);
   const [activeTab, setActiveTab] = useState<ViewTab>('overview');
   const [scanDates, setScanDates] = useState<ScanDate[]>([]);
   const [currentDateIdx, setCurrentDateIdx] = useState(0);
@@ -176,6 +178,20 @@ export default function App() {
     }
   };
 
+  const handleStrategyChange = (s: Strategy) => {
+    if (!s.enabled) return;
+    setStrategy(s);
+    // Reset state for the new strategy
+    setScanDates([]);
+    setScanResults([]);
+    setPortfolios([]);
+    setPortfolioDetails({});
+    setAllTrades([]);
+    setCurrentDateIdx(0);
+    setActiveTab('overview');
+    // TODO: reload data for the new strategy when backend supports it
+  };
+
   return (
     <div className="max-w-[1400px] mx-auto px-4 py-6">
       {/* Toast notification */}
@@ -189,14 +205,45 @@ export default function App() {
       )}
 
       {/* Header */}
-      <header className="text-center mb-8">
+      <header className="text-center mb-6">
         <h1 className="text-2xl font-bold mb-1">Option Income Strategy</h1>
         <p className="text-[#8b8fa3] text-sm">
-          Automated credit put spread scanning with portfolio tracking
+          Automated option scanning with portfolio tracking
         </p>
       </header>
 
-      {/* Controls Row: Tabs + Action Buttons */}
+      {/* Strategy Selector */}
+      <div className="flex items-center gap-2 mb-6 overflow-x-auto pb-1">
+        {STRATEGIES.map((s) => (
+          <button
+            key={s.id}
+            onClick={() => handleStrategyChange(s)}
+            disabled={!s.enabled}
+            className={`relative flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold
+              transition-all whitespace-nowrap border
+              ${strategy.id === s.id && s.enabled
+                ? 'text-white border-transparent'
+                : s.enabled
+                  ? 'bg-[#1a1d27] border-[#2a2e3a] text-[#8b8fa3] hover:text-white hover:border-[#3a3e4a]'
+                  : 'bg-[#1a1d27]/50 border-[#2a2e3a]/50 text-[#8b8fa3]/50 cursor-not-allowed'
+              }`}
+            style={strategy.id === s.id && s.enabled ? { background: s.color } : undefined}
+          >
+            {!s.enabled && <Lock className="w-3 h-3" />}
+            {s.name}
+            {!s.enabled && (
+              <span className="text-[10px] font-normal opacity-70">Soon</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Strategy description */}
+      <div className="text-center mb-6">
+        <p className="text-sm text-[#8b8fa3]">{strategy.description}</p>
+      </div>
+
+      {/* Controls Row: View Tabs + Action Buttons */}
       <div className="flex flex-wrap items-center gap-3 mb-6">
         {/* Tab buttons */}
         <div className="flex bg-[#1a1d27] rounded-lg p-1">
@@ -206,9 +253,10 @@ export default function App() {
               onClick={() => setActiveTab(key)}
               className={`px-4 py-2 rounded-md text-sm font-semibold transition-all
                 ${activeTab === key
-                  ? 'bg-[#4f8ff7] text-white'
+                  ? 'text-white'
                   : 'text-[#8b8fa3] hover:text-white'
                 }`}
+              style={activeTab === key ? { background: strategy.color } : undefined}
             >
               {key === 'overview' && <List className="w-4 h-4 inline mr-1.5 -mt-0.5" />}
               {key === 'trades' && <TrendingUp className="w-4 h-4 inline mr-1.5 -mt-0.5" />}
@@ -234,8 +282,9 @@ export default function App() {
         <button
           onClick={handleRunScan}
           disabled={scanLoading || pnlLoading}
-          className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700
+          className="flex items-center gap-2 px-4 py-2 hover:opacity-90
             rounded-lg text-sm font-medium text-white transition-all disabled:opacity-50"
+          style={{ background: strategy.color }}
         >
           {scanLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <TrendingUp className="w-4 h-4" />}
           {scanLoading ? 'Scanning...' : 'Run Scan & Build'}
@@ -276,7 +325,7 @@ export default function App() {
       {/* Loading state */}
       {loading && (
         <div className="flex items-center justify-center py-20">
-          <Loader2 className="w-8 h-8 animate-spin text-[#4f8ff7]" />
+          <Loader2 className="w-8 h-8 animate-spin" style={{ color: strategy.color }} />
         </div>
       )}
 
@@ -285,7 +334,7 @@ export default function App() {
         <div className="text-center py-20">
           <p className="text-[#8b8fa3] text-lg mb-4">No scan data yet</p>
           <p className="text-[#8b8fa3] text-sm">
-            Run a scan to get started with credit put spread analysis.
+            Run a scan to get started with {strategy.name.toLowerCase()} analysis.
           </p>
         </div>
       )}

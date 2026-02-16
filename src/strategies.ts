@@ -33,7 +33,7 @@ export const STRATEGIES: Strategy[] = [
     name: 'Yearly Income',
     shortName: 'Yearly',
     description: 'Long-term credit put spreads held until expiration for annual income',
-    scanName: 'yearly income all',
+    scanName: 'Yearly income all',
     color: '#f59e0b',
     enabled: true,
     tradesPerPortfolio: 2,

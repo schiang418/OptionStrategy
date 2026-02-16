@@ -47,8 +47,8 @@ router.post('/scan', async (req, res) => {
     }
 
     if (exists && overwrite) {
-      console.log(`[API] Overwriting existing scan data for ${scanDate}`);
-      await deleteScanDataForDate(scanDate);
+      console.log(`[API] Overwriting existing scan data for ${scanDate} (${scanName})`);
+      await deleteScanDataForDate(scanDate, scanName);
     }
 
     console.log(`[API] Running scan "${scanName}" for ${scanDate}...`);
@@ -108,8 +108,8 @@ router.post('/monday-workflow', async (req, res) => {
     // Step 1: Run scan (same-day overwrite)
     const exists = await scanExistsForDate(today, scanName);
     if (exists) {
-      console.log(`[API] Overwriting existing scan data for ${today}`);
-      await deleteScanDataForDate(today);
+      console.log(`[API] Overwriting existing scan data for ${today} (${scanName})`);
+      await deleteScanDataForDate(today, scanName);
     }
 
     console.log('[API] Running scan...');

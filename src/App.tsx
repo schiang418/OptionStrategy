@@ -366,6 +366,7 @@ export default function App() {
           <ScanResultsPanel
             results={scanResults}
             scanDate={currentDate?.scanDate || ''}
+            scanName={strategy.scanName}
             onDataChange={handleDataChange}
           />
         </>

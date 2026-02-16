@@ -105,8 +105,9 @@ export function fetchScanResults(date: string, scanName?: string): Promise<ScanR
   return fetchJSON(`/option-scans/${date}${params}`);
 }
 
-export function deleteScanData(date: string): Promise<{ success: boolean; deletedCount: number }> {
-  return fetchJSON(`/option-scans/${date}`, { method: 'DELETE' });
+export function deleteScanData(date: string, scanName?: string): Promise<{ success: boolean; deletedCount: number }> {
+  const params = scanName ? `?scanName=${encodeURIComponent(scanName)}` : '';
+  return fetchJSON(`/option-scans/${date}${params}`, { method: 'DELETE' });
 }
 
 // ---------------------------------------------------------------------------

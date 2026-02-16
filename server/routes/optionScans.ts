@@ -46,7 +46,8 @@ router.get('/:date', async (req, res) => {
 router.delete('/:date', async (req, res) => {
   try {
     const { date } = req.params;
-    const deletedCount = await deleteScanData(date);
+    const scanName = req.query.scanName as string | undefined;
+    const deletedCount = await deleteScanData(date, scanName);
     res.json({ success: true, deletedCount });
   } catch (error: any) {
     res.status(500).json({ error: error.message });

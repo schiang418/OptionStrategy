@@ -9,7 +9,7 @@ const BASE = `http://localhost:${PORT}`;
  */
 const ENABLED_STRATEGIES = [
   { scanName: 'bi-weekly income all', tradesPerPortfolio: 5 },
-  { scanName: 'yearly income all', tradesPerPortfolio: 2 },
+  { scanName: 'Yearly income all', tradesPerPortfolio: 2 },
 ];
 
 /**

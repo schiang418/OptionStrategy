@@ -199,17 +199,33 @@ export async function scrapeOptionSamurai(
     log('STEP6', `Results table loaded with ${rowCount} rows`);
 
     // Step 7: Export CSV
-    log('STEP7', 'Clicking EXPORT...');
-    await page.click('button:has-text("EXPORT")');
-    await page.waitForSelector('text=All pages results to CSV', { timeout: 10000 });
+    // Retry up to 3 times — the dropdown / download can be flaky on slower loads.
+    let downloadPath = '';
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        log('STEP7', `Clicking EXPORT (attempt ${attempt})...`);
+        await page.click('button:has-text("EXPORT")');
+        await page.waitForSelector('text=All pages results to CSV', { timeout: 10000 });
 
-    const downloadPromise = page.waitForEvent('download', { timeout: 60000 });
-    await page.click('button:has-text("All pages results to CSV")');
-    const download = await downloadPromise;
+        // Set up download listener BEFORE clicking the CSV button.
+        const downloadPromise = page.waitForEvent('download', { timeout: 60000 });
+        // Use noWaitAfter so Playwright does NOT wait for a navigation that
+        // will never happen — the click triggers a file download, not a page nav.
+        await page.click('button:has-text("All pages results to CSV")', { noWaitAfter: true });
+        const download = await downloadPromise;
 
-    const downloadPath = `/tmp/scan_${Date.now()}.csv`;
-    await download.saveAs(downloadPath);
-    log('STEP7', `CSV saved to ${downloadPath}`);
+        downloadPath = `/tmp/scan_${Date.now()}.csv`;
+        await download.saveAs(downloadPath);
+        log('STEP7', `CSV saved to ${downloadPath}`);
+        break; // success
+      } catch (err: any) {
+        log('STEP7', `Export attempt ${attempt} failed: ${err.message}`);
+        if (attempt === 3) throw err;
+        // Dismiss any open dropdown before retrying
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(2000);
+      }
+    }
 
     // Parse CSV
     const fs = await import('fs');

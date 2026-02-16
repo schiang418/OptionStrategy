@@ -35,11 +35,11 @@ const mondayScanJob = cron.schedule(
 );
 
 /**
- * Daily 4:50 PM ET Mon-Fri: Update P&L for all active portfolios.
- * Runs just before the market closes to capture end-of-day prices.
+ * Daily 5:15 PM ET Mon-Fri: Update P&L for all active portfolios.
+ * Uses live Polygon data for option spreads and stock prices.
  */
 const dailyPnlJob = cron.schedule(
-  '50 16 * * 1-5',
+  '15 17 * * 1-5',
   async () => {
     console.log('[Cron] Daily P&L update starting...');
     try {
@@ -55,7 +55,7 @@ const dailyPnlJob = cron.schedule(
 export function startCronJobs() {
   console.log('[Cron] Starting cron jobs...');
   console.log('[Cron]   Monday scan: 10:00 AM ET');
-  console.log('[Cron]   Daily P&L:   4:50 PM ET Mon-Fri');
+  console.log('[Cron]   Daily P&L:   5:15 PM ET Mon-Fri');
   mondayScanJob.start();
   dailyPnlJob.start();
 }

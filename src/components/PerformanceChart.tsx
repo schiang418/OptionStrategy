@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import ReactDOM from 'react-dom';
 import {
   LineChart,
   Line,
@@ -40,6 +41,70 @@ function fmtPct(val: number): string {
 function pnlColor(val: number): string {
   if (val === 0) return 'text-gray-300';
   return val > 0 ? 'text-green-400' : 'text-red-400';
+}
+
+// ---------------------------------------------------------------------------
+// Cell Tooltip -- portal-based to avoid parent overflow clipping
+// ---------------------------------------------------------------------------
+
+function CellTooltip({
+  children,
+  lines,
+}: {
+  children: React.ReactNode;
+  lines: string[];
+}) {
+  const [show, setShow] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const triggerRef = useRef<HTMLSpanElement>(null);
+  const timeout = useRef<ReturnType<typeof setTimeout>>();
+
+  const onEnter = () => {
+    clearTimeout(timeout.current);
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      setPos({
+        top: rect.top + window.scrollY,
+        left: rect.left + rect.width / 2 + window.scrollX,
+      });
+    }
+    timeout.current = setTimeout(() => setShow(true), 300);
+  };
+  const onLeave = () => {
+    clearTimeout(timeout.current);
+    setShow(false);
+  };
+
+  useEffect(() => () => clearTimeout(timeout.current), []);
+
+  const tooltip = show && pos ? ReactDOM.createPortal(
+    <div
+      style={{ position: 'absolute', top: pos.top, left: pos.left, transform: 'translate(-50%, -100%)', marginTop: -8 }}
+      className="z-[9999] bg-[#242836] border border-[#3a3e4a] rounded-lg px-3 py-2 shadow-xl
+        text-[11px] font-mono leading-relaxed whitespace-nowrap pointer-events-none"
+    >
+      {lines.map((l, i) => (
+        <div key={i} className={i === lines.length - 1 ? 'text-white font-bold border-t border-[#3a3e4a] pt-1 mt-1' : 'text-[#8b8fa3]'}>
+          {l}
+        </div>
+      ))}
+      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2
+        w-2 h-2 bg-[#242836] border-r border-b border-[#3a3e4a] rotate-45" />
+    </div>,
+    document.body,
+  ) : null;
+
+  return (
+    <span
+      ref={triggerRef}
+      className="cursor-default"
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+    >
+      {children}
+      {tooltip}
+    </span>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -284,19 +349,52 @@ export default function PerformanceChart() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="bg-[#0f1117] border border-[#2a2e3a] rounded-lg p-3">
             <div className="text-xs text-[#8b8fa3] mb-1">Total Capital Deployed</div>
-            <div className="text-sm font-bold">{fmtMoneyShort(overallCapital)}</div>
+            <div className="text-sm font-bold">
+              <CellTooltip lines={[
+                'Sum of initial capital across all portfolios:',
+                ...portfolios.map(p => `  ${p.type === 'top_return' ? 'Return' : 'Prob'} (${p.scanDate}): ${fmtMoneyShort(p.initialCapital)}`),
+                `= ${fmtMoneyShort(overallCapital)}`,
+              ]}>
+                {fmtMoneyShort(overallCapital)}
+              </CellTooltip>
+            </div>
           </div>
           <div className="bg-[#0f1117] border border-[#2a2e3a] rounded-lg p-3">
             <div className="text-xs text-[#8b8fa3] mb-1">Total Net P&L</div>
-            <div className={`text-sm font-bold ${pnlColor(overallPnl)}`}>{fmtMoney(overallPnl)}</div>
+            <div className={`text-sm font-bold ${pnlColor(overallPnl)}`}>
+              <CellTooltip lines={[
+                'Sum of net P&L across all portfolios:',
+                ...portfolios.map(p => `  ${p.type === 'top_return' ? 'Return' : 'Prob'} (${p.scanDate}): ${fmtMoney(p.netPnl)}`),
+                `= ${fmtMoney(overallPnl)}`,
+              ]}>
+                {fmtMoney(overallPnl)}
+              </CellTooltip>
+            </div>
           </div>
           <div className="bg-[#0f1117] border border-[#2a2e3a] rounded-lg p-3">
             <div className="text-xs text-[#8b8fa3] mb-1">Overall ROI</div>
-            <div className={`text-sm font-bold ${pnlColor(overallPnl)}`}>{fmtPct(overallRoi)}</div>
+            <div className={`text-sm font-bold ${pnlColor(overallPnl)}`}>
+              <CellTooltip lines={[
+                'Total Net P&L / Total Capital × 100:',
+                `  Net P&L: ${fmtMoney(overallPnl)}`,
+                `  Capital: ${fmtMoneyShort(overallCapital)}`,
+                `= ${fmtMoney(overallPnl)} / ${fmtMoneyShort(overallCapital)} × 100 = ${fmtPct(overallRoi)}`,
+              ]}>
+                {fmtPct(overallRoi)}
+              </CellTooltip>
+            </div>
           </div>
           <div className="bg-[#0f1117] border border-[#2a2e3a] rounded-lg p-3">
             <div className="text-xs text-[#8b8fa3] mb-1">Total Premium Collected</div>
-            <div className="text-sm font-bold text-green-400">{fmtMoney(overallPremium)}</div>
+            <div className="text-sm font-bold text-green-400">
+              <CellTooltip lines={[
+                'Sum of premium collected across all portfolios:',
+                ...portfolios.map(p => `  ${p.type === 'top_return' ? 'Return' : 'Prob'} (${p.scanDate}): ${fmtMoney(p.totalPremiumCollected)}`),
+                `= ${fmtMoney(overallPremium)}`,
+              ]}>
+                {fmtMoney(overallPremium)}
+              </CellTooltip>
+            </div>
           </div>
         </div>
       </div>
@@ -319,25 +417,57 @@ export default function PerformanceChart() {
                 <div>
                   <div className="text-xs text-[#8b8fa3]">Cumulative ROI</div>
                   <div className={`text-lg font-bold ${isPos ? 'text-green-400' : 'text-red-400'}`}>
-                    {fmtPct(s.cumulativeRoi)}
+                    <CellTooltip lines={[
+                      'Compounded return across all portfolios:',
+                      ...(grouped[s.key] || []).map(p => {
+                        const r = p.initialCapital ? (p.netPnl / p.initialCapital) * 100 : 0;
+                        return `  ${p.scanDate}: ${fmtPct(r)}`;
+                      }),
+                      `= Compound: ${fmtPct(s.cumulativeRoi)}`,
+                    ]}>
+                      {fmtPct(s.cumulativeRoi)}
+                    </CellTooltip>
                   </div>
                 </div>
                 <div>
                   <div className="text-xs text-[#8b8fa3]">Avg ROI</div>
                   <div className={`text-sm font-bold ${pnlColor(s.avgRoi)}`}>
-                    {fmtPct(s.avgRoi)}
+                    <CellTooltip lines={[
+                      'Average ROI across all portfolios:',
+                      ...(grouped[s.key] || []).map(p => {
+                        const r = p.initialCapital ? (p.netPnl / p.initialCapital) * 100 : 0;
+                        return `  ${p.scanDate}: ${fmtPct(r)}`;
+                      }),
+                      `= Sum / ${s.portfolioCount} = ${fmtPct(s.avgRoi)}`,
+                    ]}>
+                      {fmtPct(s.avgRoi)}
+                    </CellTooltip>
                   </div>
                 </div>
                 <div>
                   <div className="text-xs text-[#8b8fa3]">Win Rate</div>
                   <div className={`text-sm font-bold ${s.winRate >= 50 ? 'text-green-400' : 'text-red-400'}`}>
-                    {s.winRate.toFixed(0)}%
+                    <CellTooltip lines={[
+                      'Portfolios with positive P&L / total:',
+                      `  Wins: ${(grouped[s.key] || []).filter(p => p.netPnl > 0).length}`,
+                      `  Total: ${s.portfolioCount}`,
+                      `= ${(grouped[s.key] || []).filter(p => p.netPnl > 0).length} / ${s.portfolioCount} × 100 = ${s.winRate.toFixed(0)}%`,
+                    ]}>
+                      {s.winRate.toFixed(0)}%
+                    </CellTooltip>
                   </div>
                 </div>
                 <div>
                   <div className="text-xs text-[#8b8fa3]">Premium Yield</div>
                   <div className="text-sm font-bold text-green-400">
-                    {s.premiumYield.toFixed(2)}%
+                    <CellTooltip lines={[
+                      'Total premium / total capital × 100:',
+                      `  Premium: ${fmtMoney(s.totalPremium)}`,
+                      `  Capital: ${fmtMoneyShort(s.totalCapital)}`,
+                      `= ${fmtMoney(s.totalPremium)} / ${fmtMoneyShort(s.totalCapital)} × 100 = ${s.premiumYield.toFixed(2)}%`,
+                    ]}>
+                      {s.premiumYield.toFixed(2)}%
+                    </CellTooltip>
                   </div>
                 </div>
               </div>
@@ -480,27 +610,65 @@ export default function PerformanceChart() {
                     )}
                   </td>
                   <td className={`px-4 py-3 text-right font-semibold ${pnlColor(s.avgRoi)}`}>
-                    {fmtPct(s.avgRoi)}
+                    <CellTooltip lines={[
+                      `Sum of ROIs / ${s.portfolioCount} portfolios`,
+                      `= ${fmtPct(s.avgRoi)}`,
+                    ]}>
+                      {fmtPct(s.avgRoi)}
+                    </CellTooltip>
                   </td>
                   <td className={`px-4 py-3 text-right font-semibold ${pnlColor(s.cumulativeRoi)}`}>
-                    {fmtPct(s.cumulativeRoi)}
+                    <CellTooltip lines={[
+                      'Compounded: (1+r₁)(1+r₂)…(1+rₙ) − 1',
+                      `= ${fmtPct(s.cumulativeRoi)}`,
+                    ]}>
+                      {fmtPct(s.cumulativeRoi)}
+                    </CellTooltip>
                   </td>
                   <td className={`px-4 py-3 text-right ${pnlColor(s.bestRoi)}`}>
-                    {fmtPct(s.bestRoi)}
+                    <CellTooltip lines={[
+                      'Highest single-portfolio ROI',
+                      `= ${fmtPct(s.bestRoi)}`,
+                    ]}>
+                      {fmtPct(s.bestRoi)}
+                    </CellTooltip>
                   </td>
                   <td className={`px-4 py-3 text-right ${pnlColor(s.worstRoi)}`}>
-                    {fmtPct(s.worstRoi)}
+                    <CellTooltip lines={[
+                      'Lowest single-portfolio ROI',
+                      `= ${fmtPct(s.worstRoi)}`,
+                    ]}>
+                      {fmtPct(s.worstRoi)}
+                    </CellTooltip>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <span className={s.winRate >= 50 ? 'text-green-400' : 'text-red-400'}>
-                      {s.winRate.toFixed(0)}%
-                    </span>
+                    <CellTooltip lines={[
+                      `Profitable portfolios / total:`,
+                      `  ${(grouped[s.key] || []).filter(p => p.netPnl > 0).length} wins / ${s.portfolioCount} total`,
+                      `= ${s.winRate.toFixed(0)}%`,
+                    ]}>
+                      <span className={s.winRate >= 50 ? 'text-green-400' : 'text-red-400'}>
+                        {s.winRate.toFixed(0)}%
+                      </span>
+                    </CellTooltip>
                   </td>
                   <td className={`px-4 py-3 text-right font-semibold ${pnlColor(s.totalPnl)}`}>
-                    {fmtMoney(s.totalPnl)}
+                    <CellTooltip lines={[
+                      'Sum of net P&L across all portfolios:',
+                      ...(grouped[s.key] || []).map(p => `  ${p.scanDate}: ${fmtMoney(p.netPnl)}`),
+                      `= ${fmtMoney(s.totalPnl)}`,
+                    ]}>
+                      {fmtMoney(s.totalPnl)}
+                    </CellTooltip>
                   </td>
                   <td className="px-4 py-3 text-right text-green-400">
-                    {s.premiumYield.toFixed(2)}%
+                    <CellTooltip lines={[
+                      'Total premium / total capital × 100:',
+                      `  ${fmtMoney(s.totalPremium)} / ${fmtMoneyShort(s.totalCapital)}`,
+                      `= ${s.premiumYield.toFixed(2)}%`,
+                    ]}>
+                      {s.premiumYield.toFixed(2)}%
+                    </CellTooltip>
                   </td>
                 </tr>
               ))}
@@ -538,33 +706,80 @@ export default function PerformanceChart() {
                 <div className="grid grid-cols-3 gap-2 mb-2">
                   <div>
                     <div className="text-xs text-[#8b8fa3]">Capital</div>
-                    <div className="text-sm font-bold">{fmtMoneyShort(p.initialCapital)}</div>
+                    <div className="text-sm font-bold">
+                      <CellTooltip lines={[
+                        'Sum of max loss (capital at risk) across trades',
+                        `= ${fmtMoney(p.initialCapital)}`,
+                      ]}>
+                        {fmtMoneyShort(p.initialCapital)}
+                      </CellTooltip>
+                    </div>
                   </div>
                   <div>
                     <div className="text-xs text-[#8b8fa3]">P&L</div>
                     <div className={`text-sm font-bold ${pnlColor(p.netPnl)}`}>
-                      {fmtMoney(p.netPnl)}
+                      <CellTooltip lines={[
+                        'Sum of (premium − spreadValue) × contracts',
+                        `  Premium collected: ${fmtMoney(p.totalPremiumCollected)}`,
+                        `  Current value: ${fmtMoney(p.currentValue)}`,
+                        `= ${fmtMoney(p.netPnl)}`,
+                      ]}>
+                        {fmtMoney(p.netPnl)}
+                      </CellTooltip>
                     </div>
                   </div>
                   <div>
                     <div className="text-xs text-[#8b8fa3]">ROI</div>
                     <div className={`text-sm font-bold ${pnlColor(p.netPnl)}`}>
-                      {fmtPct(roi)}
+                      <CellTooltip lines={[
+                        'Net P&L / Initial Capital × 100:',
+                        `  P&L: ${fmtMoney(p.netPnl)}`,
+                        `  Capital: ${fmtMoney(p.initialCapital)}`,
+                        `= ${fmtMoney(p.netPnl)} / ${fmtMoney(p.initialCapital)} × 100 = ${fmtPct(roi)}`,
+                      ]}>
+                        {fmtPct(roi)}
+                      </CellTooltip>
                     </div>
                   </div>
                 </div>
                 <div className="grid grid-cols-3 gap-2 border-t border-[#2a2e3a] pt-2">
                   <div>
                     <div className="text-xs text-[#8b8fa3]">Premium</div>
-                    <div className="text-sm font-bold text-green-400">{fmtMoneyShort(p.totalPremiumCollected)}</div>
+                    <div className="text-sm font-bold text-green-400">
+                      <CellTooltip lines={[
+                        'Total credit received from selling spreads',
+                        `= creditReceived × contracts per trade`,
+                        `= ${fmtMoney(p.totalPremiumCollected)}`,
+                      ]}>
+                        {fmtMoneyShort(p.totalPremiumCollected)}
+                      </CellTooltip>
+                    </div>
                   </div>
                   <div>
                     <div className="text-xs text-[#8b8fa3]">Prem Yield</div>
-                    <div className="text-sm font-bold text-green-400">{premYield.toFixed(2)}%</div>
+                    <div className="text-sm font-bold text-green-400">
+                      <CellTooltip lines={[
+                        'Total Premium / Initial Capital × 100:',
+                        `  Premium: ${fmtMoney(p.totalPremiumCollected)}`,
+                        `  Capital: ${fmtMoney(p.initialCapital)}`,
+                        `= ${fmtMoney(p.totalPremiumCollected)} / ${fmtMoney(p.initialCapital)} × 100 = ${premYield.toFixed(2)}%`,
+                      ]}>
+                        {premYield.toFixed(2)}%
+                      </CellTooltip>
+                    </div>
                   </div>
                   <div>
                     <div className="text-xs text-[#8b8fa3]">Current Val</div>
-                    <div className="text-sm font-bold">{fmtMoneyShort(p.currentValue)}</div>
+                    <div className="text-sm font-bold">
+                      <CellTooltip lines={[
+                        'Initial Capital + Net P&L:',
+                        `  Capital: ${fmtMoney(p.initialCapital)}`,
+                        `  P&L: ${fmtMoney(p.netPnl)}`,
+                        `= ${fmtMoney(p.initialCapital)} + ${fmtMoney(p.netPnl)} = ${fmtMoney(p.currentValue)}`,
+                      ]}>
+                        {fmtMoneyShort(p.currentValue)}
+                      </CellTooltip>
+                    </div>
                   </div>
                 </div>
               </div>

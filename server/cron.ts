@@ -17,11 +17,11 @@ async function localPost(path: string): Promise<any> {
 }
 
 /**
- * Monday 10:00 AM ET: Run full Monday workflow.
+ * Monday 9:30 AM ET: Run full Monday workflow.
  * Calls the API endpoint which handles: market-day check, scan, portfolio creation.
  */
 const mondayScanJob = cron.schedule(
-  '0 10 * * 1',
+  '30 9 * * 1',
   async () => {
     console.log('[Cron] Monday scan workflow starting...');
     try {
@@ -54,7 +54,7 @@ const dailyPnlJob = cron.schedule(
 
 export function startCronJobs() {
   console.log('[Cron] Starting cron jobs...');
-  console.log('[Cron]   Monday scan: 10:00 AM ET');
+  console.log('[Cron]   Monday scan:  9:30 AM ET');
   console.log('[Cron]   Daily P&L:   5:15 PM ET Mon-Fri');
   mondayScanJob.start();
   dailyPnlJob.start();

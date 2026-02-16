@@ -116,11 +116,16 @@ export async function saveScanResults(
  * Delete existing scan results AND any portfolios for a given date (same-day
  * overwrite support).
  */
-export async function deleteScanDataForDate(scanDate: string): Promise<void> {
+export async function deleteScanDataForDate(scanDate: string, scanName?: string): Promise<void> {
   // Delete portfolios first (trades + history cascade via FK)
-  await db.delete(optionPortfolios).where(eq(optionPortfolios.scanDate, scanDate));
+  const portfolioConditions = [eq(optionPortfolios.scanDate, scanDate)];
+  if (scanName) portfolioConditions.push(eq(optionPortfolios.scanName, scanName));
+  await db.delete(optionPortfolios).where(and(...portfolioConditions));
+
   // Delete scan results
-  await db.delete(optionScanResults).where(eq(optionScanResults.scanDate, scanDate));
+  const scanConditions = [eq(optionScanResults.scanDate, scanDate)];
+  if (scanName) scanConditions.push(eq(optionScanResults.scanName, scanName));
+  await db.delete(optionScanResults).where(and(...scanConditions));
 }
 
 /**
@@ -217,12 +222,17 @@ export async function getScanResultsByDate(scanDate: string, scanName?: string) 
  * Delete scan data + cascading portfolios for a date.  Returns count of
  * deleted scan rows.
  */
-export async function deleteScanData(scanDate: string): Promise<number> {
+export async function deleteScanData(scanDate: string, scanName?: string): Promise<number> {
   // Portfolios cascade on FK delete
-  await db.delete(optionPortfolios).where(eq(optionPortfolios.scanDate, scanDate));
+  const portfolioConditions = [eq(optionPortfolios.scanDate, scanDate)];
+  if (scanName) portfolioConditions.push(eq(optionPortfolios.scanName, scanName));
+  await db.delete(optionPortfolios).where(and(...portfolioConditions));
+
+  const scanConditions = [eq(optionScanResults.scanDate, scanDate)];
+  if (scanName) scanConditions.push(eq(optionScanResults.scanName, scanName));
   const deleted = await db
     .delete(optionScanResults)
-    .where(eq(optionScanResults.scanDate, scanDate))
+    .where(and(...scanConditions))
     .returning();
   return deleted.length;
 }

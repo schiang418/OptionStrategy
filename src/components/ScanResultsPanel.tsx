@@ -5,6 +5,7 @@ import { deleteScanData, type ScanResult } from '../api';
 interface ScanResultsPanelProps {
   results: ScanResult[];
   scanDate: string;
+  scanName?: string;
   onDataChange: () => void;
 }
 
@@ -220,7 +221,7 @@ const COLUMNS: ColumnDef[] = [
 
 const DEFAULT_VISIBLE = new Set(COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key));
 
-export default function ScanResultsPanel({ results, scanDate, onDataChange }: ScanResultsPanelProps) {
+export default function ScanResultsPanel({ results, scanDate, scanName, onDataChange }: ScanResultsPanelProps) {
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({
     key: 'returnPercent',
     dir: 'desc',
@@ -282,7 +283,7 @@ export default function ScanResultsPanel({ results, scanDate, onDataChange }: Sc
   async function handleDelete() {
     if (!confirm(`Delete all scan data for ${scanDate}? This also removes associated portfolios.`)) return;
     try {
-      await deleteScanData(scanDate);
+      await deleteScanData(scanDate, scanName);
       onDataChange();
     } catch (err: any) {
       alert(`Delete failed: ${err.message}`);

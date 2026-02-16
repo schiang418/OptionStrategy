@@ -77,12 +77,18 @@ export async function testLogin(): Promise<{ success: boolean; message: string }
 // scrapeOptionSamurai
 // ---------------------------------------------------------------------------
 
+const MAX_SCRAPE_ATTEMPTS = 3;
+const RETRY_DELAY_MS = 10_000; // 10 s between retries
+
 /**
  * Scrape Option Samurai using Playwright (matching OptionScope pattern).
  *
  * Logs in, navigates to the scan, clicks EXPORT -> CSV, parses the CSV,
  * and returns raw float values. The portfolio service converts to
  * cents / basis points before database insertion.
+ *
+ * Retries up to MAX_SCRAPE_ATTEMPTS times with a fresh browser on each
+ * attempt to handle transient auth 502s and flaky page loads.
  */
 export async function scrapeOptionSamurai(
   scanName: string = 'bi-weekly income all',
@@ -94,6 +100,33 @@ export async function scrapeOptionSamurai(
     throw new Error('Missing OPTION_SAMURAI_EMAIL or OPTION_SAMURAI_PASSWORD');
   }
 
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= MAX_SCRAPE_ATTEMPTS; attempt++) {
+    try {
+      if (attempt > 1) {
+        log('RETRY', `Attempt ${attempt}/${MAX_SCRAPE_ATTEMPTS} — waiting ${RETRY_DELAY_MS / 1000}s...`);
+        await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+      }
+      return await runScrape(email, password, scanName);
+    } catch (err: any) {
+      lastError = err;
+      console.error(`[Scraper] Attempt ${attempt}/${MAX_SCRAPE_ATTEMPTS} failed: ${err.message}`);
+    }
+  }
+
+  throw new Error(`Failed after ${MAX_SCRAPE_ATTEMPTS} attempts: ${lastError?.message}`);
+}
+
+/**
+ * Single scrape attempt — launches a fresh browser, logs in, exports CSV,
+ * and returns parsed results. Caller is responsible for retries.
+ */
+async function runScrape(
+  email: string,
+  password: string,
+  scanName: string,
+): Promise<ScanResultRow[]> {
   let browser: Browser | null = null;
 
   try {
@@ -201,9 +234,9 @@ export async function scrapeOptionSamurai(
     // Step 7: Export CSV
     // Retry up to 3 times — the dropdown / download can be flaky on slower loads.
     let downloadPath = '';
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let exportAttempt = 1; exportAttempt <= 3; exportAttempt++) {
       try {
-        log('STEP7', `Clicking EXPORT (attempt ${attempt})...`);
+        log('STEP7', `Clicking EXPORT (attempt ${exportAttempt})...`);
         await page.click('button:has-text("EXPORT")');
         await page.waitForSelector('text=All pages results to CSV', { timeout: 10000 });
 
@@ -219,8 +252,8 @@ export async function scrapeOptionSamurai(
         log('STEP7', `CSV saved to ${downloadPath}`);
         break; // success
       } catch (err: any) {
-        log('STEP7', `Export attempt ${attempt} failed: ${err.message}`);
-        if (attempt === 3) throw err;
+        log('STEP7', `Export attempt ${exportAttempt} failed: ${err.message}`);
+        if (exportAttempt === 3) throw err;
         // Dismiss any open dropdown before retrying
         await page.keyboard.press('Escape');
         await page.waitForTimeout(2000);
@@ -299,7 +332,7 @@ export async function scrapeOptionSamurai(
 
   } catch (error: any) {
     console.error('[Scraper] Automation failed:', error.message);
-    throw new Error(`Failed to download scan results: ${error.message}`);
+    throw error;
   } finally {
     if (browser) {
       await browser.close();

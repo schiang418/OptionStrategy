@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { Trash2, SlidersHorizontal, X } from 'lucide-react';
 import { deleteScanData, type ScanResult } from '../api';
 
@@ -10,7 +10,6 @@ interface ScanResultsPanelProps {
 
 type SortKey =
   | 'ticker'
-  | 'companyName'
   | 'price'
   | 'priceChange'
   | 'ivRank'
@@ -59,19 +58,6 @@ const COLUMNS: ColumnDef[] = [
     align: 'left',
     defaultVisible: true,
     render: (r) => <span className="font-bold font-mono">{r.ticker}</span>,
-  },
-  {
-    key: 'companyName',
-    label: 'Company',
-    shortLabel: 'Company',
-    tooltip: 'Company name',
-    align: 'left',
-    defaultVisible: false,
-    render: (r) => (
-      <span className="text-[#8b8fa3] truncate max-w-[140px] inline-block">
-        {r.companyName || '-'}
-      </span>
-    ),
   },
   {
     key: 'price',
@@ -273,7 +259,7 @@ export default function ScanResultsPanel({ results, scanDate, onDataChange }: Sc
     if (sort.key === key) {
       setSort({ key, dir: sort.dir === 'asc' ? 'desc' : 'asc' });
     } else {
-      setSort({ key, dir: key === 'ticker' || key === 'companyName' ? 'asc' : 'desc' });
+      setSort({ key, dir: key === 'ticker' ? 'asc' : 'desc' });
     }
   };
 
@@ -307,20 +293,45 @@ export default function ScanResultsPanel({ results, scanDate, onDataChange }: Sc
     col,
   }: {
     col: ColumnDef;
-  }) => (
-    <th
-      onClick={() => handleSort(col.key)}
-      title={col.tooltip}
-      className={`px-3 py-3 text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide
-        cursor-pointer hover:text-[#4f8ff7] whitespace-nowrap border-b border-[#2a2e3a] select-none
-        ${col.align === 'right' ? 'text-right' : 'text-left'}`}
-    >
-      {col.label}
-      {sort.key === col.key && (
-        <span className="text-[#4f8ff7] ml-1">{sort.dir === 'asc' ? '▲' : '▼'}</span>
-      )}
-    </th>
-  );
+  }) => {
+    const [showTip, setShowTip] = useState(false);
+    const tipTimeout = useRef<ReturnType<typeof setTimeout>>();
+
+    const onEnter = () => {
+      clearTimeout(tipTimeout.current);
+      tipTimeout.current = setTimeout(() => setShowTip(true), 400);
+    };
+    const onLeave = () => {
+      clearTimeout(tipTimeout.current);
+      setShowTip(false);
+    };
+
+    return (
+      <th
+        onClick={() => handleSort(col.key)}
+        onMouseEnter={onEnter}
+        onMouseLeave={onLeave}
+        className={`px-3 py-3 text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide
+          cursor-pointer hover:text-[#4f8ff7] whitespace-nowrap border-b border-[#2a2e3a] select-none relative
+          ${col.align === 'right' ? 'text-right' : 'text-left'}`}
+      >
+        {col.label}
+        {sort.key === col.key && (
+          <span className="text-[#4f8ff7] ml-1">{sort.dir === 'asc' ? '▲' : '▼'}</span>
+        )}
+        {showTip && (
+          <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2
+            bg-[#242836] border border-[#3a3e4a] rounded-lg px-3 py-2 shadow-xl
+            text-[11px] text-[#c8ccd8] font-normal normal-case tracking-normal
+            whitespace-normal min-w-[180px] max-w-[240px] leading-relaxed pointer-events-none">
+            {col.tooltip}
+            <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2
+              w-2 h-2 bg-[#242836] border-r border-b border-[#3a3e4a] rotate-45" />
+          </div>
+        )}
+      </th>
+    );
+  };
 
   if (results.length === 0) return null;
 

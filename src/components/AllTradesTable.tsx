@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import type { Trade } from '../api';
 
 interface AllTradesTableProps {
@@ -33,6 +33,57 @@ function tradeStatusBadge(status: string) {
   return (
     <span className={`px-2 py-0.5 rounded text-xs font-medium ${map[status] || 'bg-gray-600/20 text-gray-400'}`}>
       {status.replace(/_/g, ' ')}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Cell Tooltip -- shows calculation on hover for individual table values
+// ---------------------------------------------------------------------------
+
+function CellTooltip({
+  children,
+  lines,
+}: {
+  children: React.ReactNode;
+  lines: string[];
+}) {
+  const [show, setShow] = useState(false);
+  const timeout = useRef<ReturnType<typeof setTimeout>>();
+
+  const onEnter = () => {
+    clearTimeout(timeout.current);
+    timeout.current = setTimeout(() => setShow(true), 300);
+  };
+  const onLeave = () => {
+    clearTimeout(timeout.current);
+    setShow(false);
+  };
+
+  useEffect(() => () => clearTimeout(timeout.current), []);
+
+  return (
+    <span
+      className="relative cursor-default"
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+    >
+      {children}
+      {show && (
+        <div
+          className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2
+            bg-[#242836] border border-[#3a3e4a] rounded-lg px-3 py-2 shadow-xl
+            text-[11px] font-mono leading-relaxed whitespace-nowrap pointer-events-none"
+        >
+          {lines.map((l, i) => (
+            <div key={i} className={i === lines.length - 1 ? 'text-white font-bold border-t border-[#3a3e4a] pt-1 mt-1' : 'text-[#8b8fa3]'}>
+              {l}
+            </div>
+          ))}
+          <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2
+            w-2 h-2 bg-[#242836] border-r border-b border-[#3a3e4a] rotate-45" />
+        </div>
+      )}
     </span>
   );
 }
@@ -81,7 +132,7 @@ export default function AllTradesTable({ trades }: AllTradesTableProps) {
         cursor-pointer hover:text-[#4f8ff7] whitespace-nowrap border-b border-[#2a2e3a] select-none ${className || 'text-left'}`}
     >
       {label}
-      {sort.key === sortKey && (sort.dir === 'asc' ? ' \u25B2' : ' \u25BC')}
+      {sort.key === sortKey && (sort.dir === 'asc' ? ' ▲' : ' ▼')}
     </th>
   );
 
@@ -166,21 +217,50 @@ export default function AllTradesTable({ trades }: AllTradesTableProps) {
                   {t.portfolioScanDate}
                 </td>
                 <td className="px-3 py-2 font-mono text-[#8b8fa3]">
-                  {fmtStrike(t.sellStrike)}/{fmtStrike(t.buyStrike)}
+                  <CellTooltip lines={[
+                    `Sell strike: ${fmtStrike(t.sellStrike)}`,
+                    `Buy strike: ${fmtStrike(t.buyStrike)}`,
+                    `Spread width: ${fmtMoney(t.spreadWidth)} per contract`,
+                  ]}>
+                    {fmtStrike(t.sellStrike)}/{fmtStrike(t.buyStrike)}
+                  </CellTooltip>
                 </td>
                 <td className="px-3 py-2">{t.expirationDate}</td>
                 <td className="px-3 py-2 text-right">{t.contracts}</td>
                 <td className="px-3 py-2 text-right text-green-400">
-                  {fmtMoney(t.premiumCollected * t.contracts)}
+                  <CellTooltip lines={[
+                    `Premium per contract: ${fmtMoney(t.premiumCollected)}`,
+                    `Contracts: ${t.contracts}`,
+                    `= ${fmtMoney(t.premiumCollected)} × ${t.contracts} = ${fmtMoney(t.premiumCollected * t.contracts)}`,
+                  ]}>
+                    {fmtMoney(t.premiumCollected * t.contracts)}
+                  </CellTooltip>
                 </td>
                 <td className="px-3 py-2 text-right">
                   {t.stockPriceAtEntry ? fmtMoney(t.stockPriceAtEntry) : '-'}
                 </td>
                 <td className="px-3 py-2 text-right">
-                  {t.currentStockPrice ? fmtMoney(t.currentStockPrice) : '-'}
+                  {t.currentStockPrice ? (
+                    <CellTooltip lines={[
+                      `Entry price: ${t.stockPriceAtEntry ? fmtMoney(t.stockPriceAtEntry) : 'N/A'}`,
+                      `Current price: ${fmtMoney(t.currentStockPrice)}`,
+                      t.stockPriceAtEntry
+                        ? `= Change: ${fmtMoney(t.currentStockPrice - t.stockPriceAtEntry)} (${(((t.currentStockPrice - t.stockPriceAtEntry) / t.stockPriceAtEntry) * 100).toFixed(1)}%)`
+                        : '= Change: N/A',
+                    ]}>
+                      {fmtMoney(t.currentStockPrice)}
+                    </CellTooltip>
+                  ) : '-'}
                 </td>
                 <td className={`px-3 py-2 text-right font-medium ${pnlColor(t.currentPnl)}`}>
-                  {fmtMoney(t.currentPnl)}
+                  <CellTooltip lines={[
+                    `Premium: ${fmtMoney(t.premiumCollected)} per contract`,
+                    `Spread value: ${t.currentSpreadValue != null ? fmtMoney(t.currentSpreadValue) : 'N/A'} per contract`,
+                    `Contracts: ${t.contracts}`,
+                    `= (${fmtMoney(t.premiumCollected)} − ${t.currentSpreadValue != null ? fmtMoney(t.currentSpreadValue) : '?'}) × ${t.contracts} = ${fmtMoney(t.currentPnl)}`,
+                  ]}>
+                    {fmtMoney(t.currentPnl)}
+                  </CellTooltip>
                 </td>
                 <td className="px-3 py-2 text-center">{tradeStatusBadge(t.status)}</td>
               </tr>

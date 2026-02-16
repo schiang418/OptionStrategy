@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import ReactDOM from 'react-dom';
 import { RefreshCw, HelpCircle } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
@@ -95,11 +96,23 @@ interface FormulaTooltipProps {
 
 function FormulaTooltip({ title, formulaDesc, breakdown, result, formulaRaw }: FormulaTooltipProps) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLSpanElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const triggerRef = useRef<HTMLSpanElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
+
+  const updatePos = useCallback(() => {
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    setPos({
+      top: rect.top + window.scrollY,
+      left: rect.left + rect.width / 2 + window.scrollX,
+    });
+  }, []);
 
   const showTip = () => {
     clearTimeout(timeoutRef.current);
+    updatePos();
     setOpen(true);
   };
   const hideTip = () => {
@@ -108,59 +121,63 @@ function FormulaTooltip({ title, formulaDesc, breakdown, result, formulaRaw }: F
 
   useEffect(() => () => clearTimeout(timeoutRef.current), []);
 
+  const tooltip = open && pos ? ReactDOM.createPortal(
+    <div
+      ref={tooltipRef}
+      style={{ position: 'absolute', top: pos.top, left: pos.left, transform: 'translate(-50%, -100%)', marginTop: -8 }}
+      className="z-[9999] bg-[#242836] border border-[#3a3e4a] rounded-lg p-3 shadow-xl text-xs leading-relaxed
+        min-w-[240px] max-w-[320px]"
+      onMouseEnter={showTip}
+      onMouseLeave={hideTip}
+    >
+      <div className="text-white font-semibold mb-1">{title}</div>
+      <div className="text-[#8b8fa3] mb-1.5">{formulaDesc}</div>
+
+      {breakdown && breakdown.length > 0 && (
+        <div className="font-mono text-[11px] space-y-0.5 mb-1.5">
+          {breakdown.map((b, i) => (
+            <div key={i} className="flex items-center justify-between gap-3">
+              <span className="text-[#8b8fa3]">{b.ticker}:</span>
+              <span className={
+                b.value.startsWith('+') ? 'text-green-400' :
+                b.value.startsWith('-') ? 'text-red-400' : 'text-white'
+              }>{b.value}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="border-t border-[#3a3e4a] pt-1.5 mt-1">
+        <div className="flex items-center justify-between font-mono font-bold">
+          <span className="text-[#8b8fa3]">Total:</span>
+          <span className={
+            result.startsWith('+') ? 'text-green-400' :
+            result.startsWith('-') ? 'text-red-400' : 'text-white'
+          }>{result}</span>
+        </div>
+      </div>
+
+      {formulaRaw && (
+        <div className="text-[10px] text-[#666b7a] font-mono mt-1.5 italic">
+          {formulaRaw}
+        </div>
+      )}
+
+      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2
+        w-2 h-2 bg-[#242836] border-r border-b border-[#3a3e4a] rotate-45" />
+    </div>,
+    document.body,
+  ) : null;
+
   return (
     <span
-      ref={ref}
-      className="relative inline-block"
+      ref={triggerRef}
+      className="inline-block"
       onMouseEnter={showTip}
       onMouseLeave={hideTip}
     >
       <HelpCircle className="w-3 h-3 text-[#8b8fa3] cursor-help hover:text-white transition-colors" />
-      {open && (
-        <div
-          className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2
-            bg-[#242836] border border-[#3a3e4a] rounded-lg p-3 shadow-xl text-xs leading-relaxed
-            min-w-[240px] max-w-[320px]"
-          onMouseEnter={showTip}
-          onMouseLeave={hideTip}
-        >
-          <div className="text-white font-semibold mb-1">{title}</div>
-          <div className="text-[#8b8fa3] mb-1.5">{formulaDesc}</div>
-
-          {breakdown && breakdown.length > 0 && (
-            <div className="font-mono text-[11px] space-y-0.5 mb-1.5">
-              {breakdown.map((b, i) => (
-                <div key={i} className="flex items-center justify-between gap-3">
-                  <span className="text-[#8b8fa3]">{b.ticker}:</span>
-                  <span className={
-                    b.value.startsWith('+') ? 'text-green-400' :
-                    b.value.startsWith('-') ? 'text-red-400' : 'text-white'
-                  }>{b.value}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="border-t border-[#3a3e4a] pt-1.5 mt-1">
-            <div className="flex items-center justify-between font-mono font-bold">
-              <span className="text-[#8b8fa3]">Total:</span>
-              <span className={
-                result.startsWith('+') ? 'text-green-400' :
-                result.startsWith('-') ? 'text-red-400' : 'text-white'
-              }>{result}</span>
-            </div>
-          </div>
-
-          {formulaRaw && (
-            <div className="text-[10px] text-[#666b7a] font-mono mt-1.5 italic">
-              {formulaRaw}
-            </div>
-          )}
-
-          <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2
-            w-2 h-2 bg-[#242836] border-r border-b border-[#3a3e4a] rotate-45" />
-        </div>
-      )}
+      {tooltip}
     </span>
   );
 }
@@ -177,10 +194,19 @@ function CellTooltip({
   lines: string[];
 }) {
   const [show, setShow] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const triggerRef = useRef<HTMLSpanElement>(null);
   const timeout = useRef<ReturnType<typeof setTimeout>>();
 
   const onEnter = () => {
     clearTimeout(timeout.current);
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      setPos({
+        top: rect.top + window.scrollY,
+        left: rect.left + rect.width / 2 + window.scrollX,
+      });
+    }
     timeout.current = setTimeout(() => setShow(true), 300);
   };
   const onLeave = () => {
@@ -190,28 +216,32 @@ function CellTooltip({
 
   useEffect(() => () => clearTimeout(timeout.current), []);
 
+  const tooltip = show && pos ? ReactDOM.createPortal(
+    <div
+      style={{ position: 'absolute', top: pos.top, left: pos.left, transform: 'translate(-50%, -100%)', marginTop: -8 }}
+      className="z-[9999] bg-[#242836] border border-[#3a3e4a] rounded-lg px-3 py-2 shadow-xl
+        text-[11px] font-mono leading-relaxed whitespace-nowrap pointer-events-none"
+    >
+      {lines.map((l, i) => (
+        <div key={i} className={i === lines.length - 1 ? 'text-white font-bold border-t border-[#3a3e4a] pt-1 mt-1' : 'text-[#8b8fa3]'}>
+          {l}
+        </div>
+      ))}
+      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2
+        w-2 h-2 bg-[#242836] border-r border-b border-[#3a3e4a] rotate-45" />
+    </div>,
+    document.body,
+  ) : null;
+
   return (
     <span
-      className="relative cursor-default"
+      ref={triggerRef}
+      className="cursor-default"
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
     >
       {children}
-      {show && (
-        <div
-          className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2
-            bg-[#242836] border border-[#3a3e4a] rounded-lg px-3 py-2 shadow-xl
-            text-[11px] font-mono leading-relaxed whitespace-nowrap pointer-events-none"
-        >
-          {lines.map((l, i) => (
-            <div key={i} className={i === lines.length - 1 ? 'text-white font-bold border-t border-[#3a3e4a] pt-1 mt-1' : 'text-[#8b8fa3]'}>
-              {l}
-            </div>
-          ))}
-          <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2
-            w-2 h-2 bg-[#242836] border-r border-b border-[#3a3e4a] rotate-45" />
-        </div>
-      )}
+      {tooltip}
     </span>
   );
 }

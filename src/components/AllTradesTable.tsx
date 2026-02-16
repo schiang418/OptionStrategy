@@ -125,14 +125,16 @@ export default function AllTradesTable({ trades }: AllTradesTableProps) {
     }
   };
 
-  const SortHeader = ({ label, sortKey, className }: { label: string; sortKey: SortKey; className?: string }) => (
+  const SortHeader = ({ label, sortKey, tooltip, className }: { label: string; sortKey: SortKey; tooltip?: string; className?: string }) => (
     <th
       onClick={() => handleSort(sortKey)}
+      title={tooltip}
       className={`px-3 py-3 text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide
         cursor-pointer hover:text-[#4f8ff7] whitespace-nowrap border-b border-[#2a2e3a] select-none ${className || 'text-left'}`}
     >
       {label}
       {sort.key === sortKey && (sort.dir === 'asc' ? ' ▲' : ' ▼')}
+      {tooltip && <span className="ml-1 text-[10px] opacity-40">ⓘ</span>}
     </th>
   );
 
@@ -175,26 +177,41 @@ export default function AllTradesTable({ trades }: AllTradesTableProps) {
         <table className="w-full text-[13px] border-collapse">
           <thead className="bg-[#1a1d27] sticky top-0 z-10">
             <tr>
-              <SortHeader label="Ticker" sortKey="ticker" />
-              <th className="px-3 py-3 text-left text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide border-b border-[#2a2e3a]">
-                Portfolio
+              <SortHeader label="Ticker" sortKey="ticker" tooltip="Stock ticker symbol for this trade" />
+              <th
+                title="Which portfolio this trade belongs to (Top Return or Top Probability) and its scan date"
+                className="px-3 py-3 text-left text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide border-b border-[#2a2e3a] cursor-help"
+              >
+                Portfolio <span className="ml-1 text-[10px] opacity-40">ⓘ</span>
               </th>
-              <th className="px-3 py-3 text-left text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide border-b border-[#2a2e3a]">
-                Strikes
+              <th
+                title="Put credit spread strike prices: Sell (higher) / Buy (lower). The difference is the spread width."
+                className="px-3 py-3 text-left text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide border-b border-[#2a2e3a] cursor-help"
+              >
+                Strikes <span className="ml-1 text-[10px] opacity-40">ⓘ</span>
               </th>
-              <SortHeader label="Expiration" sortKey="expirationDate" />
-              <th className="px-3 py-3 text-right text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide border-b border-[#2a2e3a]">
-                Ctrs
+              <SortHeader label="Expiration" sortKey="expirationDate" tooltip="Options expiration date. After this date the trade settles as profit or loss." />
+              <th
+                title="Number of spread contracts for this trade. Each contract represents 100 shares."
+                className="px-3 py-3 text-right text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide border-b border-[#2a2e3a] cursor-help"
+              >
+                Ctrs <span className="ml-1 text-[10px] opacity-40">ⓘ</span>
               </th>
-              <SortHeader label="Premium" sortKey="premiumCollected" className="text-right" />
-              <th className="px-3 py-3 text-right text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide border-b border-[#2a2e3a]">
-                Entry
+              <SortHeader label="Premium" sortKey="premiumCollected" className="text-right" tooltip="Total credit received from selling the spread (premium per contract × number of contracts)" />
+              <th
+                title="Stock price at the time this trade was opened"
+                className="px-3 py-3 text-right text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide border-b border-[#2a2e3a] cursor-help"
+              >
+                Entry <span className="ml-1 text-[10px] opacity-40">ⓘ</span>
               </th>
-              <th className="px-3 py-3 text-right text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide border-b border-[#2a2e3a]">
-                Current
+              <th
+                title="Current stock price. Compare with entry price to see underlying stock movement."
+                className="px-3 py-3 text-right text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide border-b border-[#2a2e3a] cursor-help"
+              >
+                Current <span className="ml-1 text-[10px] opacity-40">ⓘ</span>
               </th>
-              <SortHeader label="P&L" sortKey="currentPnl" className="text-right" />
-              <SortHeader label="Status" sortKey="status" className="text-center" />
+              <SortHeader label="P&L" sortKey="currentPnl" className="text-right" tooltip="Current profit or loss: (Premium Collected − Current Spread Value) × Contracts" />
+              <SortHeader label="Status" sortKey="status" className="text-center" tooltip="Trade status: Open (active), Expired Profit (expired worthless for buyer), or Expired Loss (assigned)" />
             </tr>
           </thead>
           <tbody>

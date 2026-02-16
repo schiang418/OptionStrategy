@@ -350,7 +350,7 @@ function PortfolioCard({
     : null;
 
   return (
-    <div className="bg-[#1a1d27] rounded-xl border border-[#2a2e3a] overflow-hidden">
+    <div className="bg-[#1a1d27] rounded-xl border border-[#2a2e3a]">
       <div className="p-4 border-b border-[#2a2e3a]">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-lg font-semibold">{typeLabel}</h3>

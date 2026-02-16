@@ -72,48 +72,91 @@ function tradeStatusBadge(status: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Formula Tooltip -- shows calculation breakdown like OptionScope
+// Formula Tooltip -- shows actual calculation breakdown on hover
 // ---------------------------------------------------------------------------
 
-function FormulaTooltip({
-  label,
-  formula,
-  values,
-  result,
-}: {
-  label: string;
-  formula: string;
-  values: string;
+interface TradeBreakdownLine {
+  ticker: string;
+  value: string;
+}
+
+interface FormulaTooltipProps {
+  /** Tooltip title */
+  title: string;
+  /** Description of the formula */
+  formulaDesc: string;
+  /** Per-trade breakdown lines (ticker + value) */
+  breakdown?: TradeBreakdownLine[];
+  /** Final result line */
   result: string;
-}) {
+  /** Raw formula at the bottom */
+  formulaRaw?: string;
+}
+
+function FormulaTooltip({ title, formulaDesc, breakdown, result, formulaRaw }: FormulaTooltipProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLSpanElement>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
 
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
+  const showTip = () => {
+    clearTimeout(timeoutRef.current);
+    setOpen(true);
+  };
+  const hideTip = () => {
+    timeoutRef.current = setTimeout(() => setOpen(false), 150);
+  };
+
+  useEffect(() => () => clearTimeout(timeoutRef.current), []);
 
   return (
-    <span ref={ref} className="relative inline-block">
-      <button
-        onClick={() => setOpen(!open)}
-        className="focus:outline-none"
-        aria-label={`${label} formula`}
-      >
-        <HelpCircle className="w-3 h-3 text-[#8b8fa3] cursor-help hover:text-white transition-colors" />
-      </button>
+    <span
+      ref={ref}
+      className="relative inline-block"
+      onMouseEnter={showTip}
+      onMouseLeave={hideTip}
+    >
+      <HelpCircle className="w-3 h-3 text-[#8b8fa3] cursor-help hover:text-white transition-colors" />
       {open && (
-        <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-56
-          bg-[#242836] border border-[#3a3e4a] rounded-lg p-3 shadow-xl text-xs leading-relaxed">
-          <div className="text-[#8b8fa3] mb-1">{label}</div>
-          <div className="text-white font-mono">{formula}</div>
-          <div className="text-[#8b8fa3] font-mono mt-0.5">{values}</div>
-          <div className="text-white font-bold font-mono mt-0.5">= {result}</div>
+        <div
+          className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2
+            bg-[#242836] border border-[#3a3e4a] rounded-lg p-3 shadow-xl text-xs leading-relaxed
+            min-w-[240px] max-w-[320px]"
+          onMouseEnter={showTip}
+          onMouseLeave={hideTip}
+        >
+          <div className="text-white font-semibold mb-1">{title}</div>
+          <div className="text-[#8b8fa3] mb-1.5">{formulaDesc}</div>
+
+          {breakdown && breakdown.length > 0 && (
+            <div className="font-mono text-[11px] space-y-0.5 mb-1.5">
+              {breakdown.map((b, i) => (
+                <div key={i} className="flex items-center justify-between gap-3">
+                  <span className="text-[#8b8fa3]">{b.ticker}:</span>
+                  <span className={
+                    b.value.startsWith('+') ? 'text-green-400' :
+                    b.value.startsWith('-') ? 'text-red-400' : 'text-white'
+                  }>{b.value}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="border-t border-[#3a3e4a] pt-1.5 mt-1">
+            <div className="flex items-center justify-between font-mono font-bold">
+              <span className="text-[#8b8fa3]">Total:</span>
+              <span className={
+                result.startsWith('+') ? 'text-green-400' :
+                result.startsWith('-') ? 'text-red-400' : 'text-white'
+              }>{result}</span>
+            </div>
+          </div>
+
+          {formulaRaw && (
+            <div className="text-[10px] text-[#666b7a] font-mono mt-1.5 italic">
+              {formulaRaw}
+            </div>
+          )}
+
           <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2
             w-2 h-2 bg-[#242836] border-r border-b border-[#3a3e4a] rotate-45" />
         </div>
@@ -135,12 +178,7 @@ function SummaryCard({
   label: string;
   value: string;
   valueColor?: string;
-  tooltipProps?: {
-    label: string;
-    formula: string;
-    values: string;
-    result: string;
-  };
+  tooltipProps?: FormulaTooltipProps;
 }) {
   return (
     <div className="bg-[#0f1117] border border-[#2a2e3a] rounded-lg p-3">
@@ -289,10 +327,14 @@ function PortfolioCard({
             label="Initial Capital"
             value={fmtMoney(portfolio.initialCapital)}
             tooltipProps={{
-              label: 'Initial Capital',
-              formula: 'Sum of max losses across all positions',
-              values: `${trades.length} trades × max loss per trade`,
+              title: 'Initial Capital',
+              formulaDesc: 'Sum of max loss (capital at risk) across all trades:',
+              breakdown: trades.map((t) => ({
+                ticker: t.ticker,
+                value: fmtMoneyShort(t.maxLossPerContract * t.contracts),
+              })),
               result: initialCapitalDollars,
+              formulaRaw: 'maxLoss = (sellStrike − buyStrike) × 100 × contracts',
             }}
           />
           <SummaryCard
@@ -300,10 +342,14 @@ function PortfolioCard({
             value={fmtMoney(portfolio.currentValue)}
             valueColor={pnlColor(portfolio.netPnl)}
             tooltipProps={{
-              label: 'Current Value',
-              formula: 'Initial Capital + Net P&L',
-              values: `${initialCapitalDollars} + ${netPnlDollars}`,
+              title: 'Current Value',
+              formulaDesc: 'Initial Capital + Net P&L:',
+              breakdown: [
+                { ticker: 'Initial Capital', value: initialCapitalDollars },
+                { ticker: 'Net P&L', value: (portfolio.netPnl >= 0 ? '+' : '') + netPnlDollars },
+              ],
               result: currentValueDollars,
+              formulaRaw: 'currentValue = initialCapital + netPnl',
             }}
           />
           <SummaryCard
@@ -311,10 +357,16 @@ function PortfolioCard({
             value={fmtMoney(portfolio.netPnl)}
             valueColor={pnlColor(portfolio.netPnl)}
             tooltipProps={{
-              label: 'Net Gain/Loss',
-              formula: 'Sum of (Premium - Spread Value) × Contracts',
-              values: `across ${trades.length} trades`,
-              result: netPnlDollars,
+              title: 'Net Gain/Loss',
+              formulaDesc: 'Sum of P&L across all trades:',
+              breakdown: trades.map((t) => ({
+                ticker: t.ticker,
+                value: t.currentPnl != null
+                  ? (t.currentPnl >= 0 ? '+' : '') + fmtMoneyShort(t.currentPnl)
+                  : '$0',
+              })),
+              result: (portfolio.netPnl >= 0 ? '+' : '') + netPnlDollars,
+              formulaRaw: 'pnl = (premium − spreadValue) × contracts',
             }}
           />
           <SummaryCard
@@ -322,10 +374,14 @@ function PortfolioCard({
             value={`${roiStr}%`}
             valueColor={pnlColor(portfolio.netPnl)}
             tooltipProps={{
-              label: 'Return on Investment',
-              formula: 'Net P&L / Initial Capital × 100',
-              values: `${netPnlDollars} / ${initialCapitalDollars} × 100`,
+              title: 'Return on Investment',
+              formulaDesc: 'Net P&L / Initial Capital × 100:',
+              breakdown: [
+                { ticker: 'Net P&L', value: (portfolio.netPnl >= 0 ? '+' : '') + netPnlDollars },
+                { ticker: 'Initial Capital', value: initialCapitalDollars },
+              ],
               result: `${roiStr}%`,
+              formulaRaw: 'ROI = netPnl / initialCapital × 100',
             }}
           />
           <SummaryCard
@@ -333,10 +389,14 @@ function PortfolioCard({
             value={fmtMoney(portfolio.totalPremiumCollected)}
             valueColor="text-green-400"
             tooltipProps={{
-              label: 'Total Premium Collected',
-              formula: 'Sum of premium × contracts for all trades',
-              values: `${trades.length} trades, max profit if all expire OTM`,
-              result: premiumDollars,
+              title: 'Total Premium Collected',
+              formulaDesc: 'Sum of credit received across all trades:',
+              breakdown: trades.map((t) => ({
+                ticker: t.ticker,
+                value: '+' + fmtMoneyShort(t.premiumCollected * t.contracts),
+              })),
+              result: '+' + premiumDollars,
+              formulaRaw: 'premium = creditReceived × contracts',
             }}
           />
           <SummaryCard
@@ -344,10 +404,14 @@ function PortfolioCard({
             value={`${premiumYieldStr}%`}
             valueColor="text-green-400"
             tooltipProps={{
-              label: 'Premium Yield',
-              formula: 'Total Premium / Initial Capital × 100',
-              values: `${premiumDollars} / ${initialCapitalDollars} × 100`,
+              title: 'Premium Yield',
+              formulaDesc: 'Total Premium / Initial Capital × 100:',
+              breakdown: [
+                { ticker: 'Total Premium', value: '+' + premiumDollars },
+                { ticker: 'Initial Capital', value: initialCapitalDollars },
+              ],
               result: `${premiumYieldStr}%`,
+              formulaRaw: 'yield = totalPremium / initialCapital × 100',
             }}
           />
         </div>

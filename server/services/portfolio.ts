@@ -295,16 +295,28 @@ export async function createPortfoliosFromScan(
   }
 
   // ---- Filter qualifying trades ----
-  const qualifying = results.filter(r => {
-    const ret = r.returnPercent ?? 0;
-    const prob = r.probMaxProfit ?? 0;
-    return ret >= MIN_RETURN_BP && prob >= MIN_PROB_BP;
-  });
+  // Bi-weekly income: apply minimum thresholds to weed out low-quality trades.
+  // Yearly income: skip thresholds and simply pick the top N by ranking.
+  const isYearly = scanName.toLowerCase().includes('yearly');
 
-  console.log(
-    `[Portfolio] ${qualifying.length} of ${results.length} trades qualify ` +
-    `(return >= ${MIN_RETURN_BP} bp, prob >= ${MIN_PROB_BP} bp)`,
-  );
+  const qualifying = isYearly
+    ? results
+    : results.filter(r => {
+        const ret = r.returnPercent ?? 0;
+        const prob = r.probMaxProfit ?? 0;
+        return ret >= MIN_RETURN_BP && prob >= MIN_PROB_BP;
+      });
+
+  if (isYearly) {
+    console.log(
+      `[Portfolio] ${qualifying.length} trades available (yearly — no min thresholds)`,
+    );
+  } else {
+    console.log(
+      `[Portfolio] ${qualifying.length} of ${results.length} trades qualify ` +
+      `(return >= ${MIN_RETURN_BP} bp, prob >= ${MIN_PROB_BP} bp)`,
+    );
+  }
 
   if (qualifying.length === 0) {
     console.log('[Portfolio] No qualifying trades -- skipping portfolio creation');

@@ -15,11 +15,13 @@ const router = Router();
 /**
  * GET /api/option-portfolios/comparison
  * Performance comparison data for all portfolios (grouped by type).
+ * Optional ?scanName= filter.
  * NOTE: Must be defined BEFORE /:id to avoid Express matching "comparison" as an id.
  */
-router.get('/comparison', async (_req, res) => {
+router.get('/comparison', async (req, res) => {
   try {
-    const data = await getPortfolioComparison();
+    const scanName = req.query.scanName as string | undefined;
+    const data = await getPortfolioComparison(scanName);
     res.json(data);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -29,10 +31,12 @@ router.get('/comparison', async (_req, res) => {
 /**
  * GET /api/option-portfolios/trades
  * All trades across all portfolios.
+ * Optional ?scanName= filter.
  */
-router.get('/trades', async (_req, res) => {
+router.get('/trades', async (req, res) => {
   try {
-    const trades = await getAllTrades();
+    const scanName = req.query.scanName as string | undefined;
+    const trades = await getAllTrades(scanName);
     res.json(trades);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -41,16 +45,17 @@ router.get('/trades', async (_req, res) => {
 
 /**
  * GET /api/option-portfolios
- * List all portfolios. Optional ?date= filter.
+ * List all portfolios. Optional ?date= and ?scanName= filter.
  */
 router.get('/', async (req, res) => {
   try {
-    const { date } = req.query;
+    const { date, scanName } = req.query;
+    const sn = typeof scanName === 'string' ? scanName : undefined;
     if (date && typeof date === 'string') {
-      const portfolios = await getPortfoliosByDate(date);
+      const portfolios = await getPortfoliosByDate(date, sn);
       return res.json(portfolios);
     }
-    const portfolios = await getAllPortfolios();
+    const portfolios = await getAllPortfolios(sn);
     res.json(portfolios);
   } catch (error: any) {
     res.status(500).json({ error: error.message });

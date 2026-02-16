@@ -8,7 +8,30 @@ interface ScanResultsPanelProps {
   onDataChange: () => void;
 }
 
-type SortKey = 'ticker' | 'price' | 'returnPercent' | 'probMaxProfit' | 'daysToExp' | 'maxProfit';
+type SortKey =
+  | 'ticker'
+  | 'price'
+  | 'strike'
+  | 'expDate'
+  | 'daysToExp'
+  | 'probMaxProfit'
+  | 'maxProfit'
+  | 'maxLoss'
+  | 'returnPercent'
+  | 'totalOptVol';
+
+const TOOLTIPS: Record<SortKey, string> = {
+  ticker: 'Stock ticker symbol',
+  price: 'Current stock price',
+  strike: 'Strike prices for the put spread (sell/buy). Example: 385/335 means sell 385 put, buy 335 put.',
+  expDate: 'Option expiration date',
+  daysToExp: 'Days until option expiration',
+  probMaxProfit: 'Probability of max profit at expiration. Derived from current options prices and implied volatility.',
+  maxProfit: 'Maximum profit if stock stays above the short strike. This is the credit received when selling the spread.',
+  maxLoss: 'Maximum loss if stock falls below the long strike. Formula: (Sell Strike - Buy Strike) \u00d7 100 - Credit Received.',
+  returnPercent: 'Return on investment (ROI) if the trade expires at max profit. Calculated as credit received / max loss.',
+  totalOptVol: 'Total option volume traded today',
+};
 
 function returnBarColor(ret: number | null): string {
   if (ret == null) return '#ef4444';
@@ -19,6 +42,12 @@ function returnBarColor(ret: number | null): string {
   return '#ef4444';
 }
 
+function parseSellStrike(strike: string | null): number {
+  if (!strike) return 0;
+  const parts = strike.split('/');
+  return parseFloat(parts[0]) || 0;
+}
+
 export default function ScanResultsPanel({ results, scanDate, onDataChange }: ScanResultsPanelProps) {
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({
     key: 'returnPercent',
@@ -27,8 +56,17 @@ export default function ScanResultsPanel({ results, scanDate, onDataChange }: Sc
 
   const sorted = useMemo(() => {
     return [...results].sort((a, b) => {
-      const va = (a as any)[sort.key] ?? 0;
-      const vb = (b as any)[sort.key] ?? 0;
+      let va: any;
+      let vb: any;
+
+      if (sort.key === 'strike') {
+        va = parseSellStrike(a.strike);
+        vb = parseSellStrike(b.strike);
+      } else {
+        va = (a as any)[sort.key] ?? 0;
+        vb = (b as any)[sort.key] ?? 0;
+      }
+
       if (typeof va === 'string') {
         return sort.dir === 'asc'
           ? va.localeCompare(vb)
@@ -56,14 +94,23 @@ export default function ScanResultsPanel({ results, scanDate, onDataChange }: Sc
     }
   }
 
-  const SortHeader = ({ label, sortKey, className }: { label: string; sortKey: SortKey; className?: string }) => (
+  const SortHeader = ({
+    label,
+    sortKey,
+    className,
+  }: {
+    label: string;
+    sortKey: SortKey;
+    className?: string;
+  }) => (
     <th
       onClick={() => handleSort(sortKey)}
+      title={TOOLTIPS[sortKey]}
       className={`px-3 py-3 text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide
         cursor-pointer hover:text-[#4f8ff7] whitespace-nowrap border-b border-[#2a2e3a] select-none ${className || 'text-left'}`}
     >
       {label}
-      {sort.key === sortKey && (sort.dir === 'asc' ? ' \u25B2' : ' \u25BC')}
+      {sort.key === sortKey && (sort.dir === 'asc' ? ' ▲' : ' ▼')}
     </th>
   );
 
@@ -94,18 +141,13 @@ export default function ScanResultsPanel({ results, scanDate, onDataChange }: Sc
             <tr>
               <SortHeader label="Ticker" sortKey="ticker" />
               <SortHeader label="Price" sortKey="price" />
-              <th className="px-3 py-3 text-left text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide border-b border-[#2a2e3a]">
-                Strike
-              </th>
-              <th className="px-3 py-3 text-left text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide border-b border-[#2a2e3a]">
-                Exp Date
-              </th>
+              <SortHeader label="Strike" sortKey="strike" />
+              <SortHeader label="Exp Date" sortKey="expDate" />
               <SortHeader label="DTE" sortKey="daysToExp" />
+              <SortHeader label="Volume" sortKey="totalOptVol" className="text-right" />
               <SortHeader label="Prob Profit" sortKey="probMaxProfit" className="text-right" />
               <SortHeader label="Max Profit" sortKey="maxProfit" className="text-right" />
-              <th className="px-3 py-3 text-right text-xs font-semibold text-[#8b8fa3] uppercase tracking-wide border-b border-[#2a2e3a]">
-                Max Loss
-              </th>
+              <SortHeader label="Max Loss" sortKey="maxLoss" className="text-right" />
               <SortHeader label="Return" sortKey="returnPercent" className="text-right" />
             </tr>
           </thead>
@@ -124,6 +166,9 @@ export default function ScanResultsPanel({ results, scanDate, onDataChange }: Sc
                   <td className="px-3 py-2 font-mono text-[#8b8fa3]">{r.strike}</td>
                   <td className="px-3 py-2">{r.expDate}</td>
                   <td className="px-3 py-2">{r.daysToExp}</td>
+                  <td className="px-3 py-2 text-right text-[#8b8fa3]">
+                    {r.totalOptVol != null ? r.totalOptVol.toLocaleString() : '-'}
+                  </td>
                   <td className="px-3 py-2 text-right">{probPct}%</td>
                   <td className="px-3 py-2 text-right text-green-400">
                     ${r.maxProfit?.toFixed(0) ?? '-'}

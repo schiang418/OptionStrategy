@@ -244,23 +244,33 @@ export async function scrapeOptionSamurai(
           }
         }
 
+        // CSV percentage fields are decimals (0.8131 = 81.31%).
+        // portfolio.ts expects plain numbers (81.31) and divides by 100
+        // before converting to basis points, so multiply by 100 here.
+        const probRaw = parseFloat(r['Prob Max Pro'] || r['Prob Max Profit'] || r['Prob. of Max. Profit'] || '0');
+        const returnRaw = parseFloat(r['Return Acqui'] || r['Return Acquisition'] || r['Return %'] || '0');
+        const ivRankRaw = parseFloat(r['Stock Iv'] || r['IV Rank'] || '0');
+        const ivPctRaw = parseFloat(r['IV Percentile'] || '0');
+        const moneynessRaw = parseFloat(r['Moneyness'] || '0');
+
         return {
           ticker,
           companyName: r['Company Name'] || r['Name'] || '',
           price: parseFloat(r['Stock Last'] || r['Price'] || '0'),
           priceChange: parseFloat(r['Price Change'] || r['% Change'] || '0'),
-          ivRank: parseFloat(r['Stock Iv'] || r['IV Rank'] || '0'),
-          ivPercentile: parseFloat(r['IV Percentile'] || '0'),
+          ivRank: ivRankRaw <= 1 ? ivRankRaw * 100 : ivRankRaw,
+          ivPercentile: ivPctRaw <= 1 ? ivPctRaw * 100 : ivPctRaw,
           strike: r['Strike'] || '',
-          moneyness: parseFloat(r['Moneyness'] || '0'),
+          moneyness: moneynessRaw <= 1 ? moneynessRaw * 100 : moneynessRaw,
           expDate,
           daysToExp: parseInt(r['Days To Exp'] || r['Days To Expiration'] || r['DTE'] || '0'),
           totalOptVol: parseInt(r['Total Vol'] || r['Total Opt. Vol.'] || r['Volume'] || '0'),
-          probMaxProfit: parseFloat(r['Prob Max Pro'] || r['Prob Max Profit'] || r['Prob. of Max. Profit'] || '0'),
-          // CSV values are per-share, multiply by 100 for per-contract
-          maxProfit: parseFloat(r['Max Profit'] || r['Max. Profit'] || '0') * 100,
-          maxLoss: parseFloat(r['Max Loss'] || r['Max. Loss'] || '0') * 100,
-          returnPercent: parseFloat(r['Return Acqui'] || r['Return Acquisition'] || r['Return %'] || '0'),
+          probMaxProfit: probRaw <= 1 ? probRaw * 100 : probRaw,
+          // CSV values are per-share dollars — do NOT multiply by 100 here;
+          // portfolio.ts already handles per-share → per-contract conversion.
+          maxProfit: parseFloat(r['Max Profit'] || r['Max. Profit'] || '0'),
+          maxLoss: parseFloat(r['Max Loss'] || r['Max. Loss'] || '0'),
+          returnPercent: returnRaw <= 1 ? returnRaw * 100 : returnRaw,
         } as ScanResultRow;
       })
       .filter((r): r is ScanResultRow => r !== null);

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, HelpCircle } from 'lucide-react';
 import { updatePortfolioPnl, type Portfolio, type PortfolioWithTrades } from '../api';
 
 interface PortfolioCardsProps {
@@ -97,23 +97,43 @@ function PortfolioCard({
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="bg-[#0f1117] border border-[#2a2e3a] rounded-lg p-3">
-            <div className="text-xs text-[#8b8fa3] mb-1">Initial Capital</div>
+            <div className="flex items-center gap-1 mb-1">
+              <div className="text-xs text-[#8b8fa3]">Initial Capital</div>
+              <span title="Total capital required (sum of max losses) to hold all positions until expiration.">
+                <HelpCircle className="w-3 h-3 text-[#8b8fa3] cursor-help" />
+              </span>
+            </div>
             <div className="text-sm font-bold">{fmtMoney(portfolio.initialCapital)}</div>
           </div>
           <div className="bg-[#0f1117] border border-[#2a2e3a] rounded-lg p-3">
-            <div className="text-xs text-[#8b8fa3] mb-1">Premium Collected</div>
+            <div className="flex items-center gap-1 mb-1">
+              <div className="text-xs text-[#8b8fa3]">Premium Collected</div>
+              <span title="Total credit received from selling the spreads. This is your max profit if all trades expire OTM.">
+                <HelpCircle className="w-3 h-3 text-[#8b8fa3] cursor-help" />
+              </span>
+            </div>
             <div className="text-sm font-bold text-green-400">
               {fmtMoney(portfolio.totalPremiumCollected)}
             </div>
           </div>
           <div className="bg-[#0f1117] border border-[#2a2e3a] rounded-lg p-3">
-            <div className="text-xs text-[#8b8fa3] mb-1">Net P&L</div>
+            <div className="flex items-center gap-1 mb-1">
+              <div className="text-xs text-[#8b8fa3]">Net P&L</div>
+              <span title="Current profit or loss. Calculated as premium collected minus current spread value across all contracts.">
+                <HelpCircle className="w-3 h-3 text-[#8b8fa3] cursor-help" />
+              </span>
+            </div>
             <div className={`text-sm font-bold ${pnlColor(portfolio.netPnl)}`}>
               {fmtMoney(portfolio.netPnl)}
             </div>
           </div>
           <div className="bg-[#0f1117] border border-[#2a2e3a] rounded-lg p-3">
-            <div className="text-xs text-[#8b8fa3] mb-1">Return</div>
+            <div className="flex items-center gap-1 mb-1">
+              <div className="text-xs text-[#8b8fa3]">Return</div>
+              <span title="Return on investment (ROI). Calculated as Net P&L / Initial Capital.">
+                <HelpCircle className="w-3 h-3 text-[#8b8fa3] cursor-help" />
+              </span>
+            </div>
             <div className={`text-sm font-bold ${pnlColor(portfolio.netPnl)}`}>
               {pnlPct}%
             </div>
@@ -127,13 +147,19 @@ function PortfolioCard({
             <thead>
               <tr className="border-b border-[#2a2e3a]">
                 <th className="px-3 py-2 text-left text-xs text-[#8b8fa3] font-semibold">Ticker</th>
-                <th className="px-3 py-2 text-left text-xs text-[#8b8fa3] font-semibold">Strikes</th>
+                <th className="px-3 py-2 text-left text-xs text-[#8b8fa3] font-semibold"
+                    title="Sell strike / Buy strike for the put credit spread">Strikes</th>
                 <th className="px-3 py-2 text-left text-xs text-[#8b8fa3] font-semibold">Exp</th>
-                <th className="px-3 py-2 text-right text-xs text-[#8b8fa3] font-semibold">Ctrs</th>
-                <th className="px-3 py-2 text-right text-xs text-[#8b8fa3] font-semibold">Premium</th>
-                <th className="px-3 py-2 text-right text-xs text-[#8b8fa3] font-semibold">Spread Val</th>
-                <th className="px-3 py-2 text-right text-xs text-[#8b8fa3] font-semibold">P&L</th>
-                <th className="px-3 py-2 text-center text-xs text-[#8b8fa3] font-semibold">Status</th>
+                <th className="px-3 py-2 text-right text-xs text-[#8b8fa3] font-semibold"
+                    title="Number of contracts for this trade. All P&L is multiplied by this number.">Ctrs</th>
+                <th className="px-3 py-2 text-right text-xs text-[#8b8fa3] font-semibold"
+                    title="Credit received from selling the spread. This is your max profit if the stock stays above the sell strike at expiration.">Premium</th>
+                <th className="px-3 py-2 text-right text-xs text-[#8b8fa3] font-semibold"
+                    title="Current market value of the spread. Lower is better — you want it to go to $0 at expiration.">Spread Val</th>
+                <th className="px-3 py-2 text-right text-xs text-[#8b8fa3] font-semibold"
+                    title="Current profit or loss. Calculated as premium collected minus current spread value.">P&L</th>
+                <th className="px-3 py-2 text-center text-xs text-[#8b8fa3] font-semibold"
+                    title="Trade status: open (active), expired_profit (expired worthless), or expired_loss (assigned).">Status</th>
               </tr>
             </thead>
             <tbody>

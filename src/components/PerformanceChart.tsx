@@ -138,17 +138,17 @@ interface StrategyStats {
 // Component
 // ---------------------------------------------------------------------------
 
-export default function PerformanceChart() {
+export default function PerformanceChart({ scanName }: { scanName?: string }) {
   const [portfolios, setPortfolios] = useState<ComparisonPortfolio[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
-    fetchPortfolioComparison()
+    fetchPortfolioComparison(scanName)
       .then(setPortfolios)
       .catch(() => setPortfolios([]))
       .finally(() => setLoading(false));
-  }, []);
+  }, [scanName]);
 
   // Group portfolios by strategy type
   const grouped = useMemo(() => {

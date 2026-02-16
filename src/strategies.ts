@@ -11,9 +11,10 @@ export interface Strategy {
   name: string;
   shortName: string;
   description: string;
-  scanName: string;        // name of the scan on Option Samurai
-  color: string;           // accent color for this strategy
-  enabled: boolean;        // false = show as "coming soon"
+  scanName: string;            // name of the scan on Option Samurai
+  color: string;               // accent color for this strategy
+  enabled: boolean;            // false = show as "coming soon"
+  tradesPerPortfolio: number;  // number of top trades to include per portfolio
 }
 
 export const STRATEGIES: Strategy[] = [
@@ -25,6 +26,17 @@ export const STRATEGIES: Strategy[] = [
     scanName: 'bi-weekly income all',
     color: '#4f8ff7',
     enabled: true,
+    tradesPerPortfolio: 5,
+  },
+  {
+    id: 'yearly-income',
+    name: 'Yearly Income',
+    shortName: 'Yearly',
+    description: 'Long-term credit put spreads held until expiration for annual income',
+    scanName: 'yearly income all',
+    color: '#f59e0b',
+    enabled: true,
+    tradesPerPortfolio: 2,
   },
   {
     id: 'weekly-income',
@@ -34,6 +46,7 @@ export const STRATEGIES: Strategy[] = [
     scanName: 'weekly income all',
     color: '#22c55e',
     enabled: false,
+    tradesPerPortfolio: 5,
   },
   {
     id: 'monthly-income',
@@ -43,6 +56,7 @@ export const STRATEGIES: Strategy[] = [
     scanName: 'monthly income all',
     color: '#f59e0b',
     enabled: false,
+    tradesPerPortfolio: 5,
   },
 ];
 

@@ -118,8 +118,11 @@ router.post('/monday-workflow', async (req, res) => {
     console.log(`[API] Saved ${scanCount} scan results`);
 
     // Step 2: Create portfolios
-    console.log('[API] Creating portfolios...');
-    const portfolios = await createPortfoliosFromScan(today, scanName);
+    const tradesPerPortfolio = typeof req.body?.tradesPerPortfolio === 'number'
+      ? req.body.tradesPerPortfolio
+      : undefined;
+    console.log(`[API] Creating portfolios (${tradesPerPortfolio ?? 'default'} trades each)...`);
+    const portfolios = await createPortfoliosFromScan(today, scanName, tradesPerPortfolio);
 
     res.json({
       success: true,

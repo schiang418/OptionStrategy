@@ -49,7 +49,7 @@ const MIN_RETURN_BP = 200;   // 2.00 %
 const MIN_PROB_BP = 8_000;   // 80.00 %
 
 const CONTRACTS_PER_TRADE = 4;
-const TRADES_PER_PORTFOLIO = 5;
+const DEFAULT_TRADES_PER_PORTFOLIO = 5;
 
 // ============================================================================
 // Scan-result CRUD
@@ -157,15 +157,25 @@ export async function scanExistsInLastNDays(days: number): Promise<boolean> {
 
 /**
  * Return all scan dates with result counts.
+ * Optionally filter by scanName.
  */
-export async function getScanDates() {
-  return db
+export async function getScanDates(scanName?: string) {
+  const query = db
     .select({
       scanDate: optionScanResults.scanDate,
       scanName: optionScanResults.scanName,
       resultCount: sql<number>`count(*)`,
     })
-    .from(optionScanResults)
+    .from(optionScanResults);
+
+  if (scanName) {
+    return query
+      .where(eq(optionScanResults.scanName, scanName))
+      .groupBy(optionScanResults.scanDate, optionScanResults.scanName)
+      .orderBy(desc(optionScanResults.scanDate));
+  }
+
+  return query
     .groupBy(optionScanResults.scanDate, optionScanResults.scanName)
     .orderBy(desc(optionScanResults.scanDate));
 }
@@ -173,12 +183,18 @@ export async function getScanDates() {
 /**
  * Get scan results for a specific date, converting stored integers back to
  * human-readable dollars / percentages for the API response.
+ * Optionally filter by scanName.
  */
-export async function getScanResultsByDate(scanDate: string) {
+export async function getScanResultsByDate(scanDate: string, scanName?: string) {
+  const conditions = [eq(optionScanResults.scanDate, scanDate)];
+  if (scanName) {
+    conditions.push(eq(optionScanResults.scanName, scanName));
+  }
+
   const rows = await db
     .select()
     .from(optionScanResults)
-    .where(eq(optionScanResults.scanDate, scanDate))
+    .where(and(...conditions))
     .orderBy(desc(optionScanResults.returnPercent));
 
   return rows.map(r => ({
@@ -228,6 +244,7 @@ export async function deleteScanData(scanDate: string): Promise<number> {
 export async function createPortfoliosFromScan(
   scanDate: string,
   scanName: string = 'bi-weekly income all',
+  tradesPerPortfolio: number = DEFAULT_TRADES_PER_PORTFOLIO,
 ): Promise<{ topReturn: number | null; topProbability: number | null }> {
   // ---- Same-day overwrite: delete any existing portfolios for this date ----
   const existingPortfolios = await db
@@ -284,12 +301,12 @@ export async function createPortfoliosFromScan(
     return { topReturn: null, topProbability: null };
   }
 
-  // ---- Pick top 5 for each type (cycle if fewer qualify) ----
-  const pickTop5 = (
+  // ---- Pick top N for each type (cycle if fewer qualify) ----
+  const pickTopN = (
     sorted: typeof qualifying,
   ): typeof qualifying => {
     const picked: typeof qualifying = [];
-    for (let i = 0; i < TRADES_PER_PORTFOLIO; i++) {
+    for (let i = 0; i < tradesPerPortfolio; i++) {
       picked.push(sorted[i % sorted.length]);
     }
     return picked;
@@ -302,8 +319,8 @@ export async function createPortfoliosFromScan(
     (a, b) => (b.probMaxProfit ?? 0) - (a.probMaxProfit ?? 0),
   );
 
-  const topReturnTrades = pickTop5(byReturn);
-  const topProbTrades = pickTop5(byProb);
+  const topReturnTrades = pickTopN(byReturn);
+  const topProbTrades = pickTopN(byProb);
 
   const topReturnId = await createPortfolio(
     'top_return',
@@ -425,7 +442,14 @@ async function createPortfolio(
 // Portfolio queries
 // ============================================================================
 
-export async function getAllPortfolios() {
+export async function getAllPortfolios(scanName?: string) {
+  if (scanName) {
+    return db
+      .select()
+      .from(optionPortfolios)
+      .where(eq(optionPortfolios.scanName, scanName))
+      .orderBy(desc(optionPortfolios.scanDate));
+  }
   return db
     .select()
     .from(optionPortfolios)
@@ -673,24 +697,36 @@ async function upsertValueHistory(
 
 /**
  * Get portfolios for a specific scan date.
+ * Optionally filter by scanName.
  */
-export async function getPortfoliosByDate(scanDate: string) {
+export async function getPortfoliosByDate(scanDate: string, scanName?: string) {
+  const conditions = [eq(optionPortfolios.scanDate, scanDate)];
+  if (scanName) {
+    conditions.push(eq(optionPortfolios.scanName, scanName));
+  }
   return db
     .select()
     .from(optionPortfolios)
-    .where(eq(optionPortfolios.scanDate, scanDate))
+    .where(and(...conditions))
     .orderBy(asc(optionPortfolios.type));
 }
 
 /**
  * Get all portfolios with value history for performance comparison.
  * Used by the comparison chart to show Top Return vs Top Probability over time.
+ * Optionally filter by scanName.
  */
-export async function getPortfolioComparison() {
-  const allPortfolios = await db
-    .select()
-    .from(optionPortfolios)
-    .orderBy(asc(optionPortfolios.scanDate));
+export async function getPortfolioComparison(scanName?: string) {
+  const allPortfolios = scanName
+    ? await db
+        .select()
+        .from(optionPortfolios)
+        .where(eq(optionPortfolios.scanName, scanName))
+        .orderBy(asc(optionPortfolios.scanDate))
+    : await db
+        .select()
+        .from(optionPortfolios)
+        .orderBy(asc(optionPortfolios.scanDate));
 
   const allSnapshots = await db
     .select()
@@ -729,8 +765,9 @@ export async function getPortfolioComparison() {
 
 /**
  * Get all trades across all portfolios for the AllTrades table.
+ * Optionally filter by scanName.
  */
-export async function getAllTrades() {
+export async function getAllTrades(scanName?: string) {
   const trades = await db
     .select()
     .from(optionPortfolioTrades)
@@ -745,11 +782,19 @@ export async function getAllTrades() {
     if (p) portfolioMap[id] = p;
   }
 
-  return trades.map(t => ({
+  let result = trades.map(t => ({
     ...t,
     portfolioType: portfolioMap[t.portfolioId]?.type,
     portfolioScanDate: portfolioMap[t.portfolioId]?.scanDate,
+    portfolioScanName: portfolioMap[t.portfolioId]?.scanName,
   }));
+
+  // Filter by scanName if provided
+  if (scanName) {
+    result = result.filter(t => t.portfolioScanName === scanName);
+  }
+
+  return result;
 }
 
 /**

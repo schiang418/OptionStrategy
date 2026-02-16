@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ChevronLeft, ChevronRight, RefreshCw, Loader2, BarChart3, TrendingUp, List, Lock } from 'lucide-react';
 import {
   fetchScanDates,
@@ -42,15 +42,20 @@ export default function App() {
   const [pnlLoading, setPnlLoading] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
+  // Track current strategy scanName in a ref so callbacks always see latest
+  const scanNameRef = useRef(strategy.scanName);
+  scanNameRef.current = strategy.scanName;
+
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
   };
 
-  // Load scan dates list
-  const loadDates = useCallback(async () => {
+  // Load scan dates list (filtered by current strategy)
+  const loadDates = useCallback(async (scanName?: string) => {
+    const sn = scanName ?? scanNameRef.current;
     try {
-      const dates = await fetchScanDates();
+      const dates = await fetchScanDates(sn);
       setScanDates(dates);
       return dates;
     } catch {
@@ -59,13 +64,14 @@ export default function App() {
     }
   }, []);
 
-  // Load data for a specific scan date
-  const loadDateData = useCallback(async (date: string) => {
+  // Load data for a specific scan date (filtered by current strategy)
+  const loadDateData = useCallback(async (date: string, scanName?: string) => {
+    const sn = scanName ?? scanNameRef.current;
     setLoading(true);
     try {
       const [results, portfolioList] = await Promise.all([
-        fetchScanResults(date).catch(() => []),
-        fetchPortfoliosByDate(date).catch(() => []),
+        fetchScanResults(date, sn).catch(() => []),
+        fetchPortfoliosByDate(date, sn).catch(() => []),
       ]);
       setScanResults(results);
       setPortfolios(portfolioList);
@@ -85,26 +91,34 @@ export default function App() {
     }
   }, []);
 
-  // Load all trades (for the trades tab)
-  const loadAllTrades = useCallback(async () => {
+  // Load all trades (for the trades tab, filtered by current strategy)
+  const loadAllTrades = useCallback(async (scanName?: string) => {
+    const sn = scanName ?? scanNameRef.current;
     try {
-      const trades = await fetchAllTrades();
+      const trades = await fetchAllTrades(sn);
       setAllTrades(trades);
     } catch {
       setAllTrades([]);
     }
   }, []);
 
+  // Load strategy data (called on initial load and strategy change)
+  const loadStrategyData = useCallback(async (scanName: string) => {
+    const dates = await loadDates(scanName);
+    if (dates.length > 0) {
+      setCurrentDateIdx(0);
+      await loadDateData(dates[0].scanDate, scanName);
+    } else {
+      setScanResults([]);
+      setPortfolios([]);
+      setPortfolioDetails({});
+    }
+  }, [loadDates, loadDateData]);
+
   // Initial load
   useEffect(() => {
-    (async () => {
-      const dates = await loadDates();
-      if (dates.length > 0) {
-        setCurrentDateIdx(0);
-        await loadDateData(dates[0].scanDate);
-      }
-    })();
-  }, [loadDates, loadDateData]);
+    loadStrategyData(strategy.scanName);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load trades when switching to trades tab
   useEffect(() => {
@@ -136,7 +150,7 @@ export default function App() {
   const handleRunScan = async () => {
     setScanLoading(true);
     try {
-      const result = await runMondayWorkflow(true);
+      const result = await runMondayWorkflow(true, strategy.scanName, strategy.tradesPerPortfolio);
       showToast(result.message || 'Scan complete');
       const dates = await loadDates();
       if (dates.length > 0) {
@@ -178,8 +192,8 @@ export default function App() {
     }
   };
 
-  const handleStrategyChange = (s: Strategy) => {
-    if (!s.enabled) return;
+  const handleStrategyChange = async (s: Strategy) => {
+    if (!s.enabled || s.id === strategy.id) return;
     setStrategy(s);
     // Reset state for the new strategy
     setScanDates([]);
@@ -189,7 +203,8 @@ export default function App() {
     setAllTrades([]);
     setCurrentDateIdx(0);
     setActiveTab('overview');
-    // TODO: reload data for the new strategy when backend supports it
+    // Load data for the new strategy
+    await loadStrategyData(s.scanName);
   };
 
   return (
@@ -363,7 +378,7 @@ export default function App() {
 
       {/* Performance/Comparison tab */}
       {activeTab === 'comparison' && (
-        <PerformanceChart />
+        <PerformanceChart scanName={strategy.scanName} />
       )}
     </div>
   );

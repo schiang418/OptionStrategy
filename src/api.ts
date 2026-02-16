@@ -95,12 +95,14 @@ export interface ComparisonPortfolio extends Portfolio {
 // Scan endpoints
 // ---------------------------------------------------------------------------
 
-export function fetchScanDates(): Promise<ScanDate[]> {
-  return fetchJSON('/option-scans/dates');
+export function fetchScanDates(scanName?: string): Promise<ScanDate[]> {
+  const params = scanName ? `?scanName=${encodeURIComponent(scanName)}` : '';
+  return fetchJSON(`/option-scans/dates${params}`);
 }
 
-export function fetchScanResults(date: string): Promise<ScanResult[]> {
-  return fetchJSON(`/option-scans/${date}`);
+export function fetchScanResults(date: string, scanName?: string): Promise<ScanResult[]> {
+  const params = scanName ? `?scanName=${encodeURIComponent(scanName)}` : '';
+  return fetchJSON(`/option-scans/${date}${params}`);
 }
 
 export function deleteScanData(date: string): Promise<{ success: boolean; deletedCount: number }> {
@@ -111,12 +113,14 @@ export function deleteScanData(date: string): Promise<{ success: boolean; delete
 // Portfolio endpoints
 // ---------------------------------------------------------------------------
 
-export function fetchPortfolios(): Promise<Portfolio[]> {
-  return fetchJSON('/option-portfolios');
+export function fetchPortfolios(scanName?: string): Promise<Portfolio[]> {
+  const params = scanName ? `?scanName=${encodeURIComponent(scanName)}` : '';
+  return fetchJSON(`/option-portfolios${params}`);
 }
 
-export function fetchPortfoliosByDate(date: string): Promise<Portfolio[]> {
-  return fetchJSON(`/option-portfolios?date=${date}`);
+export function fetchPortfoliosByDate(date: string, scanName?: string): Promise<Portfolio[]> {
+  const snParam = scanName ? `&scanName=${encodeURIComponent(scanName)}` : '';
+  return fetchJSON(`/option-portfolios?date=${date}${snParam}`);
 }
 
 export function fetchPortfolioDetail(id: number): Promise<PortfolioWithTrades> {
@@ -127,12 +131,14 @@ export function fetchPortfolioHistory(id: number): Promise<ValueHistoryPoint[]> 
   return fetchJSON(`/option-portfolios/${id}/history`);
 }
 
-export function fetchPortfolioComparison(): Promise<ComparisonPortfolio[]> {
-  return fetchJSON('/option-portfolios/comparison');
+export function fetchPortfolioComparison(scanName?: string): Promise<ComparisonPortfolio[]> {
+  const params = scanName ? `?scanName=${encodeURIComponent(scanName)}` : '';
+  return fetchJSON(`/option-portfolios/comparison${params}`);
 }
 
-export function fetchAllTrades(): Promise<Trade[]> {
-  return fetchJSON('/option-portfolios/trades');
+export function fetchAllTrades(scanName?: string): Promise<Trade[]> {
+  const params = scanName ? `?scanName=${encodeURIComponent(scanName)}` : '';
+  return fetchJSON(`/option-portfolios/trades${params}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -158,10 +164,14 @@ export function runScan(scanName?: string): Promise<any> {
   });
 }
 
-export function runMondayWorkflow(force?: boolean): Promise<any> {
+export function runMondayWorkflow(
+  force?: boolean,
+  scanName?: string,
+  tradesPerPortfolio?: number,
+): Promise<any> {
   return fetchJSON('/option-automation/monday-workflow', {
     method: 'POST',
-    body: JSON.stringify({ force }),
+    body: JSON.stringify({ force, scanName, tradesPerPortfolio }),
   });
 }
 

@@ -10,7 +10,6 @@ interface ScanResultsPanelProps {
 
 type SortKey =
   | 'ticker'
-  | 'companyName'
   | 'price'
   | 'priceChange'
   | 'ivRank'
@@ -59,19 +58,6 @@ const COLUMNS: ColumnDef[] = [
     align: 'left',
     defaultVisible: true,
     render: (r) => <span className="font-bold font-mono">{r.ticker}</span>,
-  },
-  {
-    key: 'companyName',
-    label: 'Company',
-    shortLabel: 'Company',
-    tooltip: 'Company name',
-    align: 'left',
-    defaultVisible: false,
-    render: (r) => (
-      <span className="text-[#8b8fa3] truncate max-w-[140px] inline-block">
-        {r.companyName || '-'}
-      </span>
-    ),
   },
   {
     key: 'price',
@@ -273,7 +259,7 @@ export default function ScanResultsPanel({ results, scanDate, onDataChange }: Sc
     if (sort.key === key) {
       setSort({ key, dir: sort.dir === 'asc' ? 'desc' : 'asc' });
     } else {
-      setSort({ key, dir: key === 'ticker' || key === 'companyName' ? 'asc' : 'desc' });
+      setSort({ key, dir: key === 'ticker' ? 'asc' : 'desc' });
     }
   };
 

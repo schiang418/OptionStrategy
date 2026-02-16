@@ -38,26 +38,6 @@ export const STRATEGIES: Strategy[] = [
     enabled: true,
     tradesPerPortfolio: 2,
   },
-  {
-    id: 'weekly-income',
-    name: 'Weekly Income',
-    shortName: 'Weekly',
-    description: 'Short-term credit spreads with weekly expiration',
-    scanName: 'weekly income all',
-    color: '#22c55e',
-    enabled: false,
-    tradesPerPortfolio: 5,
-  },
-  {
-    id: 'monthly-income',
-    name: 'Monthly Income',
-    shortName: 'Monthly',
-    description: 'Conservative credit spreads with monthly expiration',
-    scanName: 'monthly income all',
-    color: '#f59e0b',
-    enabled: false,
-    tradesPerPortfolio: 5,
-  },
 ];
 
 export function getStrategy(id: string): Strategy | undefined {

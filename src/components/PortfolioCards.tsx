@@ -166,6 +166,57 @@ function FormulaTooltip({ title, formulaDesc, breakdown, result, formulaRaw }: F
 }
 
 // ---------------------------------------------------------------------------
+// Cell Tooltip -- shows calculation on hover for individual table values
+// ---------------------------------------------------------------------------
+
+function CellTooltip({
+  children,
+  lines,
+}: {
+  children: React.ReactNode;
+  lines: string[];
+}) {
+  const [show, setShow] = useState(false);
+  const timeout = useRef<ReturnType<typeof setTimeout>>();
+
+  const onEnter = () => {
+    clearTimeout(timeout.current);
+    timeout.current = setTimeout(() => setShow(true), 300);
+  };
+  const onLeave = () => {
+    clearTimeout(timeout.current);
+    setShow(false);
+  };
+
+  useEffect(() => () => clearTimeout(timeout.current), []);
+
+  return (
+    <span
+      className="relative cursor-default"
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+    >
+      {children}
+      {show && (
+        <div
+          className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2
+            bg-[#242836] border border-[#3a3e4a] rounded-lg px-3 py-2 shadow-xl
+            text-[11px] font-mono leading-relaxed whitespace-nowrap pointer-events-none"
+        >
+          {lines.map((l, i) => (
+            <div key={i} className={i === lines.length - 1 ? 'text-white font-bold border-t border-[#3a3e4a] pt-1 mt-1' : 'text-[#8b8fa3]'}>
+              {l}
+            </div>
+          ))}
+          <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2
+            w-2 h-2 bg-[#242836] border-r border-b border-[#3a3e4a] rotate-45" />
+        </div>
+      )}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Summary Card
 // ---------------------------------------------------------------------------
 
@@ -467,15 +518,34 @@ function PortfolioCard({
                   <td className="px-3 py-1.5">{t.expirationDate}</td>
                   <td className="px-3 py-1.5 text-right">{t.contracts}</td>
                   <td className="px-3 py-1.5 text-right text-green-400">
-                    {fmtMoney(t.premiumCollected * t.contracts)}
+                    <CellTooltip lines={[
+                      `Premium per contract: ${fmtMoney(t.premiumCollected)}`,
+                      `Contracts: ${t.contracts}`,
+                      `= ${fmtMoney(t.premiumCollected)} × ${t.contracts} = ${fmtMoney(t.premiumCollected * t.contracts)}`,
+                    ]}>
+                      {fmtMoney(t.premiumCollected * t.contracts)}
+                    </CellTooltip>
                   </td>
                   <td className="px-3 py-1.5 text-right">
-                    {t.currentSpreadValue != null
-                      ? fmtMoney(t.currentSpreadValue * t.contracts)
-                      : '-'}
+                    {t.currentSpreadValue != null ? (
+                      <CellTooltip lines={[
+                        `Spread value per contract: ${fmtMoney(t.currentSpreadValue)}`,
+                        `Contracts: ${t.contracts}`,
+                        `= ${fmtMoney(t.currentSpreadValue)} × ${t.contracts} = ${fmtMoney(t.currentSpreadValue * t.contracts)}`,
+                      ]}>
+                        {fmtMoney(t.currentSpreadValue * t.contracts)}
+                      </CellTooltip>
+                    ) : '-'}
                   </td>
                   <td className={`px-3 py-1.5 text-right font-medium ${pnlColor(t.currentPnl)}`}>
-                    {fmtMoney(t.currentPnl)}
+                    <CellTooltip lines={[
+                      `Premium: ${fmtMoney(t.premiumCollected)} per contract`,
+                      `Spread value: ${t.currentSpreadValue != null ? fmtMoney(t.currentSpreadValue) : 'N/A'} per contract`,
+                      `Contracts: ${t.contracts}`,
+                      `= (${fmtMoney(t.premiumCollected)} − ${t.currentSpreadValue != null ? fmtMoney(t.currentSpreadValue) : '?'}) × ${t.contracts} = ${fmtMoney(t.currentPnl)}`,
+                    ]}>
+                      {fmtMoney(t.currentPnl)}
+                    </CellTooltip>
                   </td>
                   <td className="px-3 py-1.5 text-center">
                     {tradeStatusBadge(t.status)}

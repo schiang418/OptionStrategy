@@ -1,7 +1,13 @@
+node_modules/
+dist/
+.env
+*.log
+.DS_Store
+/data
+drizzle/meta/
 __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
 *.egg-info/
-dist/
 build/

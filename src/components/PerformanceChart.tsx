@@ -697,7 +697,7 @@ export default function PerformanceChart({ scanName }: { scanName?: string }) {
                     <h3 className="text-sm font-semibold">{typeLabel}</h3>
                   </div>
                   <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                    p.status === 'active' ? 'bg-green-600/20 text-green-400' : 'bg-gray-600/20 text-gray-400'
+                    p.status === 'active' ? 'bg-green-600/20 text-green-400 animate-pulse-slow' : 'bg-gray-600/20 text-gray-400'
                   }`}>
                     {p.status}
                   </span>

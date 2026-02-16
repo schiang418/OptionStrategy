@@ -50,7 +50,7 @@ function pnlColor(val: number | null | undefined): string {
 
 function statusBadge(status: string) {
   const colors = status === 'active'
-    ? 'bg-green-600/20 text-green-400'
+    ? 'bg-green-600/20 text-green-400 animate-pulse-slow'
     : 'bg-gray-600/20 text-gray-400';
   return (
     <span className={`px-2 py-0.5 rounded text-xs font-medium ${colors}`}>

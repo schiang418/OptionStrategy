@@ -59,17 +59,17 @@ async function runScanWorkflow() {
 }
 
 /**
- * Monday 9:30 AM ET: Run scan workflow.
+ * Monday 10:00 AM ET: Run scan workflow.
  *
  * Uses the `cron` package (kelektiv) which relies on Luxon for timezone
- * handling, so DST transitions are handled correctly — 9:30 AM ET stays
- * 9:30 AM whether the clock is in EST or EDT.
+ * handling, so DST transitions are handled correctly — 10:00 AM ET stays
+ * 10:00 AM whether the clock is in EST or EDT.
  *
  * If Monday is a market holiday, the scan is automatically rescheduled
- * to fire at 9:30 AM ET on the next trading day (Tue–Fri).
+ * to fire at 10:00 AM ET on the next trading day (Tue–Fri).
  */
 const mondayScanJob = CronJob.from({
-  cronTime: '30 9 * * 1',
+  cronTime: '0 10 * * 1',
   onTick: async () => {
     const today = todayET();
     const trading = await isTradingDay(today);
@@ -86,9 +86,9 @@ const mondayScanJob = CronJob.from({
       d.setDate(d.getDate() + offset);
       const candidate = d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
       if (await isTradingDay(candidate)) {
-        console.log(`[Cron] Rescheduling scan to ${candidate} (${['Tue','Wed','Thu','Fri'][offset - 1]}) at 9:30 AM ET`);
+        console.log(`[Cron] Rescheduling scan to ${candidate} (${['Tue','Wed','Thu','Fri'][offset - 1]}) at 10:00 AM ET`);
         const makeup = CronJob.from({
-          cronTime: '30 9 * * *',
+          cronTime: '0 10 * * *',
           onTick: async () => {
             const nowDate = todayET();
             if (nowDate === candidate) {
@@ -130,7 +130,7 @@ const dailyPnlJob = CronJob.from({
 
 export function startCronJobs() {
   console.log('[Cron] Starting cron jobs...');
-  console.log(`[Cron]   Weekly scan:  Monday 9:30 AM ET (${ENABLED_STRATEGIES.length} strategies, auto-reschedules on holidays)`);
+  console.log(`[Cron]   Weekly scan:  Monday 10:00 AM ET (${ENABLED_STRATEGIES.length} strategies, auto-reschedules on holidays)`);
   console.log('[Cron]   Daily P&L:   5:15 PM ET Mon-Fri');
   mondayScanJob.start();
   dailyPnlJob.start();

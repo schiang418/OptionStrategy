@@ -1,4 +1,5 @@
-import cron from 'node-cron';
+import { CronJob } from 'cron';
+import { isTradingDay } from './services/polygon.js';
 
 const PORT = parseInt(process.env.PORT || '3000');
 const BASE = `http://localhost:${PORT}`;
@@ -31,38 +32,90 @@ async function localPost(path: string, body?: Record<string, any>): Promise<any>
 }
 
 /**
- * Monday 9:30 AM ET: Run full Monday workflow for all enabled strategies.
- * Calls the API endpoint which handles: market-day check, scan, portfolio creation.
+ * Get today's date string (YYYY-MM-DD) in Eastern Time.
  */
-const mondayScanJob = cron.schedule(
-  '30 9 * * 1',
-  async () => {
-    console.log('[Cron] Monday scan workflow starting for all strategies...');
-    for (const strategy of ENABLED_STRATEGIES) {
-      try {
-        console.log(`[Cron] Running workflow for "${strategy.scanName}"...`);
-        const result = await localPost('/api/option-automation/monday-workflow', {
-          scanName: strategy.scanName,
-          tradesPerPortfolio: strategy.tradesPerPortfolio,
+function todayET(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+}
+
+/**
+ * Run the scan workflow for all enabled strategies.
+ */
+async function runScanWorkflow() {
+  console.log('[Cron] Scan workflow starting for all strategies...');
+  for (const strategy of ENABLED_STRATEGIES) {
+    try {
+      console.log(`[Cron] Running workflow for "${strategy.scanName}"...`);
+      const result = await localPost('/api/option-automation/monday-workflow', {
+        scanName: strategy.scanName,
+        tradesPerPortfolio: strategy.tradesPerPortfolio,
+      });
+      console.log(`[Cron] ${strategy.scanName} result:`, result.message);
+    } catch (error: any) {
+      console.error(`[Cron] ${strategy.scanName} error:`, error.message);
+    }
+  }
+  console.log('[Cron] Scan workflow complete for all strategies');
+}
+
+/**
+ * Monday 9:30 AM ET: Run scan workflow.
+ *
+ * Uses the `cron` package (kelektiv) which relies on Luxon for timezone
+ * handling, so DST transitions are handled correctly — 9:30 AM ET stays
+ * 9:30 AM whether the clock is in EST or EDT.
+ *
+ * If Monday is a market holiday, the scan is automatically rescheduled
+ * to fire at 9:30 AM ET on the next trading day (Tue–Fri).
+ */
+const mondayScanJob = CronJob.from({
+  cronTime: '30 9 * * 1',
+  onTick: async () => {
+    const today = todayET();
+    const trading = await isTradingDay(today);
+
+    if (trading) {
+      await runScanWorkflow();
+      return;
+    }
+
+    // Monday is a holiday — schedule a one-shot job for the next trading day
+    console.log(`[Cron] Monday ${today} is a market holiday, looking for next trading day...`);
+    for (let offset = 1; offset <= 4; offset++) {
+      const d = new Date();
+      d.setDate(d.getDate() + offset);
+      const candidate = d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+      if (await isTradingDay(candidate)) {
+        console.log(`[Cron] Rescheduling scan to ${candidate} (${['Tue','Wed','Thu','Fri'][offset - 1]}) at 9:30 AM ET`);
+        const makeup = CronJob.from({
+          cronTime: '30 9 * * *',
+          onTick: async () => {
+            const nowDate = todayET();
+            if (nowDate === candidate) {
+              await runScanWorkflow();
+              makeup.stop();
+            }
+          },
+          timeZone: 'America/New_York',
+          start: true,
         });
-        console.log(`[Cron] ${strategy.scanName} result:`, result.message);
-      } catch (error: any) {
-        console.error(`[Cron] ${strategy.scanName} error:`, error.message);
+        return;
       }
     }
-    console.log('[Cron] Monday scan workflow complete for all strategies');
+    console.warn('[Cron] Could not find a trading day this week');
   },
-  { timezone: 'America/New_York' },
-);
+  timeZone: 'America/New_York',
+  start: false,
+});
 
 /**
  * Daily 5:15 PM ET Mon-Fri: Update P&L for all active portfolios.
  * Uses live Polygon data for option spreads and stock prices.
  * This updates ALL active portfolios regardless of strategy.
  */
-const dailyPnlJob = cron.schedule(
-  '15 17 * * 1-5',
-  async () => {
+const dailyPnlJob = CronJob.from({
+  cronTime: '15 17 * * 1-5',
+  onTick: async () => {
     console.log('[Cron] Daily P&L update starting...');
     try {
       const result = await localPost('/api/option-portfolios/update-pnl');
@@ -71,12 +124,13 @@ const dailyPnlJob = cron.schedule(
       console.error('[Cron] Daily P&L update error:', error.message);
     }
   },
-  { timezone: 'America/New_York' },
-);
+  timeZone: 'America/New_York',
+  start: false,
+});
 
 export function startCronJobs() {
   console.log('[Cron] Starting cron jobs...');
-  console.log(`[Cron]   Monday scan:  9:30 AM ET (${ENABLED_STRATEGIES.length} strategies)`);
+  console.log(`[Cron]   Weekly scan:  Monday 9:30 AM ET (${ENABLED_STRATEGIES.length} strategies, auto-reschedules on holidays)`);
   console.log('[Cron]   Daily P&L:   5:15 PM ET Mon-Fri');
   mondayScanJob.start();
   dailyPnlJob.start();

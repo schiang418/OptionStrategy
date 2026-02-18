@@ -431,9 +431,9 @@ async function createPortfolio(
       premiumCollected: premiumPerContractCents,
       spreadWidth: spreadWidthCents,
       maxLossPerContract: maxLossPerContractCents,
-      currentSpreadValue: 0,
+      currentSpreadValue: premiumPerContractCents, // approx: cost to close ≈ premium at entry
       currentStockPrice: stockPriceAtEntryCents,
-      currentPnl: premiumPerContractCents * contracts, // initial P&L = all premium
+      currentPnl: 0, // no gain/loss at entry; live P&L computed on next update
       status: 'open',
       isItm: false,
     });
@@ -446,8 +446,8 @@ async function createPortfolio(
     .update(optionPortfolios)
     .set({
       totalPremiumCollected: totalPremiumCents,
-      currentValue: INITIAL_CAPITAL_CENTS + totalPremiumCents,
-      netPnl: totalPremiumCents,
+      currentValue: INITIAL_CAPITAL_CENTS, // P&L starts at 0; updated by live data
+      netPnl: 0,
       updatedAt: new Date(),
     })
     .where(eq(optionPortfolios.id, portfolio.id));
@@ -456,6 +456,14 @@ async function createPortfolio(
     `[Portfolio] Created ${type} portfolio #${portfolio.id} with ${scanResults.length} trades, ` +
     `premium: $${fromCents(totalPremiumCents).toFixed(2)}`,
   );
+
+  // Immediately fetch live spread values so the portfolio doesn't show $0
+  try {
+    console.log(`[Portfolio] Running initial P&L update for portfolio #${portfolio.id}...`);
+    await updatePortfolioPnl(portfolio.id);
+  } catch (err: any) {
+    console.error(`[Portfolio] Initial P&L update failed for #${portfolio.id}:`, err.message);
+  }
 
   return portfolio.id;
 }
@@ -577,6 +585,9 @@ async function updatePortfolioPnl(portfolioId: number): Promise<void> {
 
         totalPnlCents += currentPnlCents;
       } else {
+        console.warn(
+          `[P&L] No spread data for trade #${trade.id} (${trade.ticker} ${trade.expirationDate}), keeping existing values`,
+        );
         totalPnlCents += trade.currentPnl ?? 0;
       }
 

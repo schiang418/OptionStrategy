@@ -68,6 +68,9 @@ export { buildOptionTicker };
  * Fetch option snapshot from Polygon.
  * All monetary values returned in **cents**.
  *
+ * Fallback chain for midpoint (matching OptionScope / massive.ts):
+ *   last_quote.midpoint → last_trade.price → day.close → 0
+ *
  * @param underlying    e.g. "AAPL"
  * @param optionTicker  e.g. "O:AAPL260227P00385000"
  */
@@ -83,16 +86,25 @@ export async function getOptionSnapshot(
       apiKey,
     );
 
-    if (!data.results) return null;
+    if (!data.results) {
+      console.warn(`[Polygon] No results for ${optionTicker}`);
+      return null;
+    }
 
     const result = data.results;
-    const quote = result.last_quote || {};
-    const trade = result.last_trade || {};
 
-    const bid = quote.bid || 0;
-    const ask = quote.ask || 0;
-    const midpoint = bid && ask ? (bid + ask) / 2 : trade.price || 0;
-    const underlyingPrice = result.underlying_asset?.price || 0;
+    // Use Polygon-provided midpoint with fallback chain (matching OptionScope)
+    const midpoint = result.last_quote?.midpoint
+      ?? result.last_trade?.price
+      ?? result.day?.close
+      ?? 0;
+    const bid = result.last_quote?.bid ?? 0;
+    const ask = result.last_quote?.ask ?? 0;
+    const underlyingPrice = result.underlying_asset?.price ?? 0;
+
+    if (midpoint === 0) {
+      console.warn(`[Polygon] Zero midpoint for ${optionTicker} (bid=${bid}, ask=${ask})`);
+    }
 
     return {
       bid: toCents(bid),
@@ -135,7 +147,12 @@ export async function getCreditPutSpreadValue(
   await sleep(RATE_LIMIT_DELAY);
   const buySnap = await getOptionSnapshot(ticker, buyTicker);
 
-  if (!sellSnap || !buySnap) return null;
+  if (!sellSnap || !buySnap) {
+    console.warn(
+      `[Polygon] Spread snapshot incomplete for ${ticker}: sell=${sellTicker}(${sellSnap ? 'ok' : 'null'}) buy=${buyTicker}(${buySnap ? 'ok' : 'null'})`,
+    );
+    return null;
+  }
 
   // Per-contract value: (sellMid - buyMid) * 100 contract multiplier
   // midpoints are already in cents-per-share, so * 100 for per-contract

@@ -61,7 +61,11 @@ Each sub-portal uses the **identical** implementation pattern, differing only in
 | Sub-portal secret env var | `PREMIUM_TOKEN_SECRET` | `PREMIUM_TOKEN_SECRET` |
 | Portal launch endpoint | `POST /api/launch/option-strategy` | `POST /api/launch/swingtrade` |
 | Auth module file | `server/auth.ts` | `server/auth.js` |
+| Handoff function name | `handleAuthCallback` | `handleAuthCallback` |
 | Frontend API file | `src/api.ts` | `client/src/api.ts` |
+| Frontend API function | `fetchJSON<T>()` (existing) | `apiFetch()` (new, per golden truth) |
+
+> **File path note:** The golden truth references `src/auth.ts` in code comments. Both projects place server code under `server/`, so we use `server/auth.ts` (TS) and `server/auth.js` (JS) respectively. The golden truth's path doesn't match either project's actual structure.
 
 > **Current business policy:** Both services are **premium services** that nominally belong to `stocks_and_options`. However, all `basic` members currently receive promotional access. To restrict later, change `ALLOWED_TIERS` to `['stocks_and_options']` — one-line change, no DB migration.
 
@@ -250,7 +254,7 @@ const SERVICE_ID = 'option_strategy';
 const ALLOWED_TIERS: string[] = ['basic', 'stocks_and_options'];
 
 // ── Handoff Endpoint ──
-export async function handleAuthHandoff(req: Request, res: Response) {
+export async function handleAuthCallback(req: Request, res: Response) {
   const { token } = req.query;
 
   if (!token || typeof token !== 'string') {
@@ -335,7 +339,7 @@ The middleware order matters. Changes to the existing `server/index.ts`:
 ```typescript
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
-import { handleAuthHandoff, requireAuth } from './auth';
+import { handleAuthCallback, requireAuth } from './auth.js';
 
 // ── Env var validation (before anything else) ──
 const REQUIRED_ENV_VARS = ['PREMIUM_TOKEN_SECRET', 'JWT_SECRET', 'MEMBER_PORTAL_URL'];
@@ -358,7 +362,7 @@ app.use(cookieParser());
 app.use(express.json());
 
 // 4. Auth handoff endpoint (no auth required)
-app.get('/auth/handoff', handleAuthHandoff);
+app.get('/auth/handoff', handleAuthCallback);
 
 // 5. Health check (no auth required)
 app.get('/api/health', (_req, res) => {
@@ -420,14 +424,18 @@ async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
 
 ### 8.4 Cron Jobs
 
-Both OptionStrategy and SwingTrade have server-side cron jobs (via `node-cron`) that call internal `localhost` endpoints for scans and price updates. These are **server-to-server calls within the same process** — they do NOT go through the browser and are NOT subject to CORS or cookie auth.
+Both OptionStrategy and SwingTrade have server-side cron jobs that call internal `localhost` endpoints for scans and price updates.
 
-**Current approach (both projects):** Cron handlers call internal functions directly or hit `localhost` endpoints. Since `requireAuth` only applies to `/api/*` routes and cron calls originate from the server process itself, they bypass auth naturally.
+**OptionStrategy** uses the `cron` package (kelektiv/node-cron, v4.4.0). **SwingTrade** uses `node-cron`. Both make HTTP `fetch()` calls to `http://localhost:${PORT}/api/...` from within the server process.
 
-**If cron jobs call `localhost/api/*` via HTTP:** They will hit the auth middleware and fail. Options:
-1. **(Recommended)** Refactor cron to call service functions directly instead of HTTP endpoints
-2. Add a health-check-style exclusion for cron-triggered paths
-3. Use a server-side auth bypass token (adds complexity)
+**Problem:** After auth is added, these internal HTTP calls will hit `requireAuth` middleware and return `401` — they have no session cookie.
+
+**Solutions (pick one per project):**
+1. **(Recommended)** Refactor cron handlers to call service functions directly instead of HTTP endpoints — avoids the auth layer entirely
+2. Exclude cron-triggered paths from auth (e.g., check `req.ip === '127.0.0.1'` or add specific path exclusions alongside `/api/health`)
+3. Use a server-side auth bypass header (adds complexity)
+
+> **This is a blocking issue** that must be resolved during Phase 2 implementation. Both projects have this same problem.
 
 ---
 
@@ -516,12 +524,12 @@ From golden truth Section 10 (propagation delay note):
 - [ ] Add startup env var validation to `server/index.ts`
 
 ### Phase 2: Backend Auth
-- [ ] Create `server/auth.ts` with `handleAuthHandoff()` and `requireAuth()` (Section 8.1)
+- [ ] Create `server/auth.ts` with `handleAuthCallback()` and `requireAuth()` per golden truth S8.1
 - [ ] Add `cookie-parser` middleware to `server/index.ts`
 - [ ] Mount `GET /auth/handoff` route (before auth middleware)
 - [ ] Apply `requireAuth` middleware to `/api/*` (excluding `/api/health`)
 - [ ] Replace `app.use(cors())` with restricted CORS (Section 8.2)
-- [ ] Verify cron jobs still work after auth is added (Section 8.4)
+- [ ] **Resolve cron job auth conflict** — refactor `server/cron.ts` HTTP calls or add exclusions (Section 8.4)
 
 ### Phase 3: Frontend Auth
 - [ ] Add `credentials: 'include'` to `fetchJSON` in `src/api.ts`
@@ -574,7 +582,7 @@ Staging uses separate secrets and URLs — never share production secrets with s
 | `.env.example` | No auth variables | Add per Section 5 |
 | API routes | All unauthenticated | Protected by middleware after Phase 2 |
 | Database | No user/auth tables (not needed — sub-portals don't store user data) | No changes needed |
-| Cron jobs (`server/cron.ts`) | Call internal endpoints via localhost | Verify still works after auth (Section 8.4) |
+| Cron jobs (`server/cron.ts`) | HTTP `fetch()` to `localhost/api/*` — **will break** after auth added | Refactor or exclude from auth (Section 8.4) |
 
 ---
 
@@ -597,3 +605,19 @@ This document replaces the previous `SUB_PORTAL_AUTH_INTEGRATION.md`. Key correc
 | No env var startup validation | Fail-fast validation required |
 | No cron job guidance | Section 8.4 addresses cron/auth interaction |
 | No codebase status section | Section 15 documents current state |
+
+---
+
+## Cross-Project Alignment Notes
+
+Discrepancies observed between SwingTrade's `SUB_PORTAL_AUTH_IMPLEMENTATION.md` and this document / the golden truth, as of 2026-02-20:
+
+| # | Area | SwingTrade Doc Says | Golden Truth / This Doc | Impact |
+|---|------|--------------------|-----------------------|--------|
+| 1 | **Function name** | `handleAuthHandoff` | `handleAuthCallback` (golden truth S8.1) | Both projects must use the same name |
+| 2 | **Staging branch** | `develop` branch (S14) | `staging` branch (golden truth S17) | Deployment mismatch if not aligned |
+| 3 | **Frontend function** | `apiFetch()` (matches golden truth) | `fetchJSON<T>()` (matches existing code) | Acceptable per-project difference — golden truth defines the pattern, not the name |
+| 4 | **Cron package** | `node-cron` | `cron` (kelektiv, v4.4.0) — different package | Both have the same localhost HTTP issue (Section 8.4) |
+| 5 | **File path** | `server/auth.js` | `server/auth.ts` | Language difference (JS vs TS), same logical location |
+
+Items #1 and #2 should be corrected in the SwingTrade doc to align with the golden truth.

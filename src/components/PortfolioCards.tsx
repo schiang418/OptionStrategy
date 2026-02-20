@@ -454,21 +454,13 @@ function PortfolioCard({
             valueColor={pnlColor(portfolio.netPnl)}
             tooltipProps={{
               title: 'Current Value',
-              formulaDesc: 'Initial Capital + Σ (premium − spreadValue) × contracts:',
+              formulaDesc: 'Initial Capital + Net P&L:',
               breakdown: [
                 { ticker: 'Initial Capital', value: initialCapitalDollars },
-                ...trades.map((t) => {
-                  const pnl = t.currentPnl ?? 0;
-                  const prem = fmtMoneyShort(t.premiumCollected);
-                  const spread = t.currentSpreadValue != null ? fmtMoneyShort(t.currentSpreadValue) : '?';
-                  return {
-                    ticker: `${t.ticker} (${prem}−${spread})×${t.contracts}`,
-                    value: (pnl >= 0 ? '+' : '') + fmtMoneyShort(pnl),
-                  };
-                }),
+                { ticker: 'Net P&L', value: (portfolio.netPnl >= 0 ? '+' : '') + netPnlDollars },
               ],
               result: currentValueDollars,
-              formulaRaw: `${initialCapitalDollars} + (${netPnlDollars}) = ${currentValueDollars}`,
+              formulaRaw: 'currentValue = initialCapital + netPnl',
             }}
           />
           <SummaryCard

@@ -57,6 +57,7 @@ function CellTooltip({
   const [show, setShow] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const triggerRef = useRef<HTMLSpanElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
   const timeout = useRef<ReturnType<typeof setTimeout>>();
 
   const onEnter = () => {
@@ -77,8 +78,23 @@ function CellTooltip({
 
   useEffect(() => () => clearTimeout(timeout.current), []);
 
+  // Clamp tooltip horizontally so it never overflows the viewport
+  useEffect(() => {
+    if (show && tooltipRef.current && pos) {
+      const el = tooltipRef.current;
+      const rect = el.getBoundingClientRect();
+      const pad = 8;
+      if (rect.left < pad) {
+        el.style.left = `${pos.left + (pad - rect.left)}px`;
+      } else if (rect.right > window.innerWidth - pad) {
+        el.style.left = `${pos.left - (rect.right - (window.innerWidth - pad))}px`;
+      }
+    }
+  }, [show, pos]);
+
   const tooltip = show && pos ? ReactDOM.createPortal(
     <div
+      ref={tooltipRef}
       style={{ position: 'absolute', top: pos.top, left: pos.left, transform: 'translate(-50%, -100%)', marginTop: -8 }}
       className="z-[9999] bg-[#242836] border border-[#3a3e4a] rounded-lg px-3 py-2 shadow-xl
         text-[11px] font-mono leading-relaxed whitespace-nowrap pointer-events-none"
@@ -418,12 +434,18 @@ export default function PerformanceChart({ scanName }: { scanName?: string }) {
                   <div className="text-xs text-[#8b8fa3]">Cumulative ROI</div>
                   <div className={`text-lg font-bold ${isPos ? 'text-green-400' : 'text-red-400'}`}>
                     <CellTooltip lines={[
-                      'Compounded return across all portfolios:',
+                      'Cumulative ROI (compounded):',
                       ...(grouped[s.key] || []).map(p => {
                         const r = p.initialCapital ? (p.netPnl / p.initialCapital) * 100 : 0;
-                        return `  ${p.scanDate}: ${fmtPct(r)}`;
+                        return `  ${p.scanDate}: ${fmtMoney(p.netPnl)} ÷ ${fmtMoneyShort(p.initialCapital)} = ${fmtPct(r)}`;
                       }),
-                      `= Compound: ${fmtPct(s.cumulativeRoi)}`,
+                      ...(grouped[s.key] || []).length > 1
+                        ? [`  Compound: ${(grouped[s.key] || []).map(p => {
+                            const r = p.initialCapital ? (p.netPnl / p.initialCapital) * 100 : 0;
+                            return `(1 ${r >= 0 ? '+' : ''}${r.toFixed(2)}%)`;
+                          }).join(' × ')} − 1`]
+                        : [],
+                      `= ${fmtPct(s.cumulativeRoi)}`,
                     ]}>
                       {fmtPct(s.cumulativeRoi)}
                     </CellTooltip>
@@ -436,9 +458,12 @@ export default function PerformanceChart({ scanName }: { scanName?: string }) {
                       'Average ROI across all portfolios:',
                       ...(grouped[s.key] || []).map(p => {
                         const r = p.initialCapital ? (p.netPnl / p.initialCapital) * 100 : 0;
-                        return `  ${p.scanDate}: ${fmtPct(r)}`;
+                        return `  ${p.scanDate}: ${fmtMoney(p.netPnl)} ÷ ${fmtMoneyShort(p.initialCapital)} = ${fmtPct(r)}`;
                       }),
-                      `= Sum / ${s.portfolioCount} = ${fmtPct(s.avgRoi)}`,
+                      `= (${(grouped[s.key] || []).map(p => {
+                        const r = p.initialCapital ? (p.netPnl / p.initialCapital) * 100 : 0;
+                        return r.toFixed(2);
+                      }).join(' + ')}%) ÷ ${s.portfolioCount} = ${fmtPct(s.avgRoi)}`,
                     ]}>
                       {fmtPct(s.avgRoi)}
                     </CellTooltip>
@@ -545,6 +570,7 @@ export default function PerformanceChart({ scanName }: { scanName?: string }) {
                 tick={{ fill: '#8b8fa3', fontSize: 11 }}
                 stroke="#2a2e3a"
                 tickFormatter={(v: number) => `${v}%`}
+                domain={[(min: number) => Math.min(min, 0), (max: number) => Math.max(max, 0)]}
               />
               <Tooltip
                 contentStyle={{ background: '#1a1d27', border: '1px solid #2a2e3a', borderRadius: 8 }}

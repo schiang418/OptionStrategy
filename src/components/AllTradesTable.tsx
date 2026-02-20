@@ -248,8 +248,10 @@ export default function AllTradesTable({ trades }: AllTradesTableProps) {
               >
                 <td className="px-3 py-2 font-bold font-mono">
                   {t.ticker}
-                  {isItm && (
-                    <span className="ml-1 text-yellow-400 text-[10px]">ITM</span>
+                  {t.status === 'open' && (
+                    isItm
+                      ? <span className="ml-1 text-yellow-400 text-[10px]">ITM</span>
+                      : <span className="ml-1 text-green-400 text-[10px]">OTM</span>
                   )}
                 </td>
                 <td className="px-3 py-2 text-[#8b8fa3] text-xs">

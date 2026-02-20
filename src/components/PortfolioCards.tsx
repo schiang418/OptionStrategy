@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { RefreshCw, HelpCircle } from 'lucide-react';
 import {
@@ -121,6 +121,20 @@ function FormulaTooltip({ title, formulaDesc, breakdown, result, formulaRaw }: F
 
   useEffect(() => () => clearTimeout(timeoutRef.current), []);
 
+  // Clamp tooltip horizontally so it never overflows the viewport
+  useLayoutEffect(() => {
+    if (open && tooltipRef.current && pos) {
+      const el = tooltipRef.current;
+      const rect = el.getBoundingClientRect();
+      const pad = 8;
+      if (rect.left < pad) {
+        el.style.left = `${pos.left + (pad - rect.left)}px`;
+      } else if (rect.right > window.innerWidth - pad) {
+        el.style.left = `${pos.left - (rect.right - (window.innerWidth - pad))}px`;
+      }
+    }
+  }, [open, pos]);
+
   const tooltip = open && pos ? ReactDOM.createPortal(
     <div
       ref={tooltipRef}
@@ -196,6 +210,7 @@ function CellTooltip({
   const [show, setShow] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const triggerRef = useRef<HTMLSpanElement>(null);
+  const cellTooltipRef = useRef<HTMLDivElement>(null);
   const timeout = useRef<ReturnType<typeof setTimeout>>();
 
   const onEnter = () => {
@@ -216,8 +231,23 @@ function CellTooltip({
 
   useEffect(() => () => clearTimeout(timeout.current), []);
 
+  // Clamp tooltip horizontally so it never overflows the viewport
+  useLayoutEffect(() => {
+    if (show && cellTooltipRef.current && pos) {
+      const el = cellTooltipRef.current;
+      const rect = el.getBoundingClientRect();
+      const pad = 8;
+      if (rect.left < pad) {
+        el.style.left = `${pos.left + (pad - rect.left)}px`;
+      } else if (rect.right > window.innerWidth - pad) {
+        el.style.left = `${pos.left - (rect.right - (window.innerWidth - pad))}px`;
+      }
+    }
+  }, [show, pos]);
+
   const tooltip = show && pos ? ReactDOM.createPortal(
     <div
+      ref={cellTooltipRef}
       style={{ position: 'absolute', top: pos.top, left: pos.left, transform: 'translate(-50%, -100%)', marginTop: -8 }}
       className="z-[9999] bg-[#242836] border border-[#3a3e4a] rounded-lg px-3 py-2 shadow-xl
         text-[11px] font-mono leading-relaxed whitespace-nowrap pointer-events-none"

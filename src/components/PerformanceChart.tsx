@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import {
   LineChart,
@@ -79,7 +79,8 @@ function CellTooltip({
   useEffect(() => () => clearTimeout(timeout.current), []);
 
   // Clamp tooltip horizontally so it never overflows the viewport
-  useEffect(() => {
+  // useLayoutEffect runs before paint so the user never sees the clipped position
+  useLayoutEffect(() => {
     if (show && tooltipRef.current && pos) {
       const el = tooltipRef.current;
       const rect = el.getBoundingClientRect();

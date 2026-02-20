@@ -55,7 +55,7 @@ const COLUMNS: ColumnDef[] = [
     key: 'ticker',
     label: 'Ticker',
     shortLabel: 'Ticker',
-    tooltip: 'Stock ticker symbol',
+    tooltip: 'Stock ticker symbol. The underlying equity for the credit put spread.',
     align: 'left',
     defaultVisible: true,
     render: (r) => <span className="font-bold font-mono">{r.ticker}</span>,
@@ -64,7 +64,7 @@ const COLUMNS: ColumnDef[] = [
     key: 'price',
     label: 'Price',
     shortLabel: 'Price',
-    tooltip: 'Current stock price',
+    tooltip: 'Current stock price at the time of scan. For the spread to be profitable, this should stay above the sell strike through expiration.',
     align: 'left',
     defaultVisible: true,
     render: (r) => <span>${r.price?.toFixed(2) ?? '-'}</span>,
@@ -73,7 +73,7 @@ const COLUMNS: ColumnDef[] = [
     key: 'priceChange',
     label: 'Chg %',
     shortLabel: 'Chg %',
-    tooltip: 'Stock price change percentage',
+    tooltip: 'Stock price change percentage for the day. A large negative move may indicate elevated risk for put spreads.',
     align: 'right',
     defaultVisible: false,
     render: (r) => {
@@ -87,7 +87,7 @@ const COLUMNS: ColumnDef[] = [
     key: 'ivRank',
     label: 'IV Rank',
     shortLabel: 'IV Rank',
-    tooltip: 'Implied volatility rank — current IV relative to its 52-week range (0–100%)',
+    tooltip: 'Implied Volatility Rank (0–100%). Measures where current IV sits within its 52-week high/low range. Formula: (Current IV − 52wk Low IV) / (52wk High IV − 52wk Low IV). Higher = better premiums for selling options.',
     align: 'right',
     defaultVisible: false,
     render: (r) => {
@@ -99,7 +99,7 @@ const COLUMNS: ColumnDef[] = [
     key: 'ivPercentile',
     label: 'IV %ile',
     shortLabel: 'IV %ile',
-    tooltip: 'Implied volatility percentile — % of days in past year with lower IV',
+    tooltip: 'Implied Volatility Percentile (0–100%). The percentage of trading days in the past year where IV was lower than today. E.g., 80% means IV is higher today than 80% of the past year. Higher = richer option premiums.',
     align: 'right',
     defaultVisible: false,
     render: (r) => {
@@ -111,7 +111,7 @@ const COLUMNS: ColumnDef[] = [
     key: 'strike',
     label: 'Strike',
     shortLabel: 'Strike',
-    tooltip: 'Strike prices for the put spread (sell/buy). Example: 385/335 means sell 385 put, buy 335 put.',
+    tooltip: 'Credit put spread strike prices shown as Sell/Buy. The sell (short) strike is higher; the buy (long) strike is lower. Example: 385/335 means sell the $385 put and buy the $335 put. The spread width (385 − 335 = $50) determines max risk.',
     align: 'left',
     defaultVisible: true,
     render: (r) => <span className="font-mono text-[#8b8fa3]">{r.strike ?? '-'}</span>,
@@ -120,7 +120,7 @@ const COLUMNS: ColumnDef[] = [
     key: 'moneyness',
     label: 'Moneyness',
     shortLabel: 'OTM %',
-    tooltip: 'How far out-of-the-money the short strike is relative to the stock price',
+    tooltip: 'How far out-of-the-money (OTM) the short put strike is from the current stock price. Formula: (Stock Price − Sell Strike) / Stock Price × 100. Higher % = more downside cushion before the trade loses money.',
     align: 'right',
     defaultVisible: false,
     render: (r) => {
@@ -132,7 +132,7 @@ const COLUMNS: ColumnDef[] = [
     key: 'expDate',
     label: 'Exp Date',
     shortLabel: 'Exp',
-    tooltip: 'Option expiration date',
+    tooltip: 'Option expiration date. Both legs of the put spread expire on this date. If the stock is above the sell strike at expiration, both puts expire worthless and you keep the full premium.',
     align: 'left',
     defaultVisible: true,
     render: (r) => <span>{r.expDate ?? '-'}</span>,
@@ -141,7 +141,7 @@ const COLUMNS: ColumnDef[] = [
     key: 'daysToExp',
     label: 'DTE',
     shortLabel: 'DTE',
-    tooltip: 'Days until option expiration',
+    tooltip: 'Days To Expiration. Number of calendar days until the option expires. Bi-weekly strategies target ~14 DTE; yearly strategies target ~365 DTE. Shorter DTE = faster time decay (theta) but less premium.',
     align: 'left',
     defaultVisible: true,
     render: (r) => <span>{r.daysToExp ?? '-'}</span>,
@@ -150,7 +150,7 @@ const COLUMNS: ColumnDef[] = [
     key: 'totalOptVol',
     label: 'Volume',
     shortLabel: 'Vol',
-    tooltip: 'Total option volume traded today',
+    tooltip: 'Total option contracts traded today for this underlying. Higher volume generally means tighter bid-ask spreads and better fill prices when entering/exiting the spread.',
     align: 'right',
     defaultVisible: true,
     render: (r) => (
@@ -163,7 +163,7 @@ const COLUMNS: ColumnDef[] = [
     key: 'probMaxProfit',
     label: 'Prob Profit',
     shortLabel: 'Prob',
-    tooltip: 'Probability of max profit at expiration. Derived from current options prices and implied volatility.',
+    tooltip: 'Probability of achieving max profit at expiration (both puts expire OTM). Derived from the option delta and implied volatility. E.g., 85% means an estimated 85% chance the stock stays above the sell strike. Higher probability = safer trade but lower return.',
     align: 'right',
     defaultVisible: true,
     render: (r) => (
@@ -174,7 +174,7 @@ const COLUMNS: ColumnDef[] = [
     key: 'maxProfit',
     label: 'Max Profit',
     shortLabel: 'Profit',
-    tooltip: 'Maximum profit if stock stays above the short strike. This is the credit received when selling the spread.',
+    tooltip: 'Maximum profit per contract if stock stays above the sell strike at expiration. This equals the net credit received when opening the spread. Formula: (Sell Put Premium − Buy Put Premium) × 100 shares. Shown in dollars per contract.',
     align: 'right',
     defaultVisible: true,
     render: (r) => (
@@ -185,7 +185,7 @@ const COLUMNS: ColumnDef[] = [
     key: 'maxLoss',
     label: 'Max Loss',
     shortLabel: 'Loss',
-    tooltip: 'Maximum loss if stock falls below the long strike. Formula: (Sell Strike - Buy Strike) × 100 - Credit Received.',
+    tooltip: 'Maximum loss per contract if stock falls below the buy strike at expiration. Formula: (Sell Strike − Buy Strike) × 100 − Credit Received. This is the worst-case risk. Shown as a negative dollar amount per contract.',
     align: 'right',
     defaultVisible: true,
     render: (r) => (
@@ -196,7 +196,7 @@ const COLUMNS: ColumnDef[] = [
     key: 'returnPercent',
     label: 'Return',
     shortLabel: 'Return',
-    tooltip: 'Return on investment (ROI) if the trade expires at max profit. Calculated as credit received / max loss.',
+    tooltip: 'Return on risk if the trade achieves max profit. Formula: Max Profit / |Max Loss| × 100. E.g., 10% means you earn $10 for every $100 at risk. Higher return trades typically have lower probability of profit.',
     align: 'right',
     defaultVisible: true,
     render: (r) => {
@@ -324,7 +324,7 @@ export default function ScanResultsPanel({ results, scanDate, scanName, onDataCh
           <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2
             bg-[#242836] border border-[#3a3e4a] rounded-lg px-3 py-2 shadow-xl
             text-[11px] text-[#c8ccd8] font-normal normal-case tracking-normal
-            whitespace-normal min-w-[180px] max-w-[240px] leading-relaxed pointer-events-none">
+            whitespace-normal min-w-[200px] max-w-[300px] leading-relaxed pointer-events-none">
             {col.tooltip}
             <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2
               w-2 h-2 bg-[#242836] border-r border-b border-[#3a3e4a] rotate-45" />

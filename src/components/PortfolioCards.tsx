@@ -43,6 +43,14 @@ function fmtStrike(cents: number): string {
   return (cents / 100).toFixed(0);
 }
 
+/** For a bull put spread, the short put is ITM when stock price < sell strike. */
+function computeIsItm(t: { currentStockPrice: number | null; stockPriceAtEntry: number | null; sellStrike: number; status: string }): boolean {
+  if (t.status !== 'open') return false; // expired trades already resolved
+  const price = (t.currentStockPrice && t.currentStockPrice > 0) ? t.currentStockPrice : t.stockPriceAtEntry;
+  if (!price || price <= 0) return false;
+  return price < t.sellStrike;
+}
+
 function pnlColor(val: number | null | undefined): string {
   if (val == null || val === 0) return 'text-gray-300';
   return val > 0 ? 'text-green-400' : 'text-red-400';
@@ -556,16 +564,18 @@ function PortfolioCard({
               </tr>
             </thead>
             <tbody>
-              {trades.map((t) => (
+              {trades.map((t) => {
+                const isItm = computeIsItm(t);
+                return (
                 <tr
                   key={t.id}
                   className={`border-b border-[#2a2e3a]/50 hover:bg-[#242836] ${
-                    t.isItm ? 'bg-yellow-900/10' : ''
+                    isItm ? 'bg-yellow-900/10' : ''
                   }`}
                 >
                   <td className="px-3 py-1.5 font-bold font-mono">
                     {t.ticker}
-                    {t.isItm && (
+                    {isItm && (
                       <span className="ml-1 text-yellow-400 text-[10px]">ITM</span>
                     )}
                   </td>
@@ -616,7 +626,8 @@ function PortfolioCard({
                     {tradeStatusBadge(t.status)}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

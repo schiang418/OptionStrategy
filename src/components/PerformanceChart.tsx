@@ -746,10 +746,10 @@ export default function PerformanceChart({ scanName }: { scanName?: string }) {
                     <div className="text-xs text-[#8b8fa3]">P&L</div>
                     <div className={`text-sm font-bold ${pnlColor(p.netPnl)}`}>
                       <CellTooltip lines={[
-                        'Sum of (premium − spreadValue) × contracts',
+                        'Σ (premium − spreadValue) × contracts:',
                         `  Premium collected: ${fmtMoney(p.totalPremiumCollected)}`,
-                        `  Current value: ${fmtMoney(p.currentValue)}`,
-                        `= ${fmtMoney(p.netPnl)}`,
+                        `  Total spread cost: ${fmtMoney(p.totalPremiumCollected - p.netPnl)}`,
+                        `= ${fmtMoney(p.totalPremiumCollected)} − ${fmtMoney(p.totalPremiumCollected - p.netPnl)} = ${fmtMoney(p.netPnl)}`,
                       ]}>
                         {fmtMoney(p.netPnl)}
                       </CellTooltip>

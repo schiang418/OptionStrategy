@@ -570,13 +570,21 @@ async function updatePortfolioPnl(portfolioId: number): Promise<void> {
         // currentPnl = (premiumCollected - spreadValue) * contracts  (all in cents)
         const currentPnlCents =
           (trade.premiumCollected - spreadData.spreadValueCents) * trade.contracts;
-        const isItm = spreadData.underlyingPriceCents <= trade.sellStrike;
+
+        // Use underlying price from Polygon; fall back to stored prices if unavailable (0)
+        const stockPriceCents = spreadData.underlyingPriceCents
+          || trade.currentStockPrice
+          || trade.stockPriceAtEntry
+          || 0;
+        const isItm = stockPriceCents > 0
+          ? stockPriceCents < trade.sellStrike
+          : (trade.isItm ?? false); // keep existing if no price at all
 
         await db
           .update(optionPortfolioTrades)
           .set({
             currentSpreadValue: spreadData.spreadValueCents,
-            currentStockPrice: spreadData.underlyingPriceCents,
+            currentStockPrice: spreadData.underlyingPriceCents || trade.currentStockPrice,
             currentPnl: currentPnlCents,
             isItm,
             updatedAt: new Date(),
@@ -640,12 +648,33 @@ async function updatePortfolioPnl(portfolioId: number): Promise<void> {
 async function handleExpiration(
   trade: typeof optionPortfolioTrades.$inferSelect,
 ): Promise<void> {
-  // Get stock closing / current price (in cents)
-  let stockPriceCents = trade.currentStockPrice ?? 0;
+  // Get stock closing / current price (in cents) with multiple fallbacks
+  let stockPriceCents = 0;
   try {
     const realtimePrice = await getCurrentStockPrice(trade.ticker);
-    if (realtimePrice != null) stockPriceCents = realtimePrice;
+    if (realtimePrice != null && realtimePrice > 0) stockPriceCents = realtimePrice;
   } catch {}
+
+  // Fallback: try close price on expiration date
+  if (stockPriceCents === 0) {
+    try {
+      await sleep(RATE_LIMIT_DELAY);
+      const closePrice = await getStockClosePrice(trade.ticker, trade.expirationDate);
+      if (closePrice != null && closePrice > 0) stockPriceCents = closePrice;
+    } catch {}
+  }
+
+  // Fallback: use stored current stock price or entry price
+  if (stockPriceCents === 0) {
+    stockPriceCents = trade.currentStockPrice ?? trade.stockPriceAtEntry ?? 0;
+  }
+
+  if (stockPriceCents === 0) {
+    console.warn(
+      `[Expiration] No stock price available for trade #${trade.id} (${trade.ticker}), skipping expiration`,
+    );
+    return;
+  }
 
   // calculateExpiredPnL takes strikes in DOLLARS, premium in cents, stock in cents
   const sellStrikeDollars = fromCents(trade.sellStrike);
@@ -673,7 +702,7 @@ async function handleExpiration(
 
   console.log(
     `[Expiration] Trade #${trade.id} (${trade.ticker}): ${status}, ` +
-    `P&L: $${fromCents(pnl).toFixed(2)}`,
+    `P&L: $${fromCents(pnl).toFixed(2)}, stock=$${fromCents(stockPriceCents).toFixed(2)}`,
   );
 }
 

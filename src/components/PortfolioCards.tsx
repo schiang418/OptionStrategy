@@ -539,7 +539,7 @@ function PortfolioCard({
               <tr className="border-b border-[#2a2e3a]">
                 <th className="px-3 py-2 text-left text-xs text-[#8b8fa3] font-semibold">Ticker</th>
                 <th className="px-3 py-2 text-right text-xs text-[#8b8fa3] font-semibold"
-                    title="Stock price at time of entry">Stock Price</th>
+                    title="Current stock price (entry price in parentheses)">Stock Price</th>
                 <th className="px-3 py-2 text-left text-xs text-[#8b8fa3] font-semibold"
                     title="Sell strike / Buy strike for the put credit spread">Sell / Buy Strike</th>
                 <th className="px-3 py-2 text-left text-xs text-[#8b8fa3] font-semibold">Expiration</th>
@@ -570,7 +570,12 @@ function PortfolioCard({
                     )}
                   </td>
                   <td className="px-3 py-1.5 text-right font-mono text-[#8b8fa3]">
-                    {t.stockPriceAtEntry != null ? fmtMoney(t.stockPriceAtEntry) : '-'}
+                    {t.currentStockPrice != null && t.currentStockPrice > 0
+                      ? fmtMoney(t.currentStockPrice)
+                      : t.stockPriceAtEntry != null ? fmtMoney(t.stockPriceAtEntry) : '-'}
+                    {t.stockPriceAtEntry != null && t.currentStockPrice != null && t.currentStockPrice > 0 && t.currentStockPrice !== t.stockPriceAtEntry && (
+                      <span className="text-[10px] text-[#5a5e6e] ml-1">({fmtMoney(t.stockPriceAtEntry)})</span>
+                    )}
                   </td>
                   <td className="px-3 py-1.5 font-mono text-[#8b8fa3]">
                     {fmtStrike(t.sellStrike)} / {fmtStrike(t.buyStrike)}

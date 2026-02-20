@@ -545,6 +545,7 @@ export default function PerformanceChart({ scanName }: { scanName?: string }) {
                 tick={{ fill: '#8b8fa3', fontSize: 11 }}
                 stroke="#2a2e3a"
                 tickFormatter={(v: number) => `${v}%`}
+                domain={[(min: number) => Math.min(min, 0), (max: number) => Math.max(max, 0)]}
               />
               <Tooltip
                 contentStyle={{ background: '#1a1d27', border: '1px solid #2a2e3a', borderRadius: 8 }}

@@ -1,35 +1,35 @@
-# Sub-Portal Authentication Implementation Strategy
+# OptionStrategy — Sub-Portal Authentication Implementation Guide
 
-> **Applies to:** OptionStrategy, SwingTrade, and all future CycleScope sub-portals
-> **Single source of truth:** [cyclescope-doc/docs/UNIFIED_AUTH_STRATEGY.md](https://github.com/schiang418/cyclescope-doc/blob/main/docs/UNIFIED_AUTH_STRATEGY.md)
-> **Related:** [CROSS_PROJECT_DISCREPANCIES.md](https://github.com/schiang418/cyclescope-doc/blob/main/docs/CROSS_PROJECT_DISCREPANCIES.md) | [GAP_ANALYSIS_SUMMARY.md](https://github.com/schiang418/cyclescope-doc/blob/main/docs/GAP_ANALYSIS_SUMMARY.md)
+> **Golden truth:** [cyclescope-doc/docs/UNIFIED_AUTH_STRATEGY.md](https://github.com/schiang418/cyclescope-doc/blob/main/docs/UNIFIED_AUTH_STRATEGY.md)
+> **This document:** OptionStrategy-specific implementation derived from the unified strategy.
+> SwingTrade uses an identical implementation with different constants (see Section 2).
 > **Last updated:** 2026-02-20
-> **Status:** Canonical — both OptionStrategy and SwingTrade agents MUST follow this spec
+> **Status:** Aligned with UNIFIED_AUTH_STRATEGY.md — any conflict, the golden truth wins.
 
 ---
 
 ## 1. Architecture Overview
 
 ```
-User clicks "Launch [Service]" in Member Portal
+User clicks "Launch Option Strategy" in Member Portal
         │
         ▼
 Portal verifies session + tier access
         │
         ▼
 Portal generates 5-min handoff JWT
-  signed with per-service secret (OPTION_STRATEGY_TOKEN_SECRET or SWINGTRADE_TOKEN_SECRET)
+  signed with OPTION_STRATEGY_TOKEN_SECRET
         │
         ▼
 Browser redirects to:
-  https://<sub-portal>/auth/handoff?token=<jwt>
+  https://option-strategy.up.railway.app/auth/handoff?token=<jwt>
         │
         ▼
-Sub-portal verifies handoff token
-  → validates `service` claim matches this service
+OptionStrategy verifies handoff token
+  → validates `service` claim (if present) matches 'option_strategy'
   → checks tier is in ALLOWED_TIERS
   → creates local 7-day session JWT (signed with own JWT_SECRET)
-  → sets httpOnly session cookie
+  → sets httpOnly cookie 'option_strategy_session'
   → redirects to /
         │
         ▼
@@ -39,43 +39,50 @@ All subsequent API calls include session cookie
 requireAuth middleware validates cookie on every /api/* request (except /api/health)
 ```
 
-**Key principles:**
+**Key principles** (from unified strategy Section 1):
 - Sub-portals **never** handle passwords, signup, or OAuth
-- All user authentication UI lives exclusively in the Member Portal
-- Patreon is purely a subscription data source managed by the Portal
+- All user authentication UI lives **exclusively** in the Member Portal
+- Patreon is a **subscription data source only** — managed entirely by the Portal
 - Sub-portals verify tokens and check tiers — that's it
+- Sub-portal data is shared across all premium users (no per-user data isolation)
 
 ---
 
 ## 2. Service-Specific Constants
 
-Each sub-portal uses the same implementation pattern but with different constants:
+Each sub-portal uses the **identical** implementation pattern, differing only in these constants.
 
 | Constant | OptionStrategy | SwingTrade |
 |----------|---------------|------------|
 | `SERVICE_ID` | `'option_strategy'` | `'swingtrade'` |
 | `SESSION_COOKIE_NAME` | `'option_strategy_session'` | `'swingtrade_session'` |
 | `ALLOWED_TIERS` | `['basic', 'stocks_and_options']` | `['basic', 'stocks_and_options']` |
-| Portal secret name | `OPTION_STRATEGY_TOKEN_SECRET` | `SWINGTRADE_TOKEN_SECRET` |
-| Local env var for shared secret | `PREMIUM_TOKEN_SECRET` | `PREMIUM_TOKEN_SECRET` |
-| Launch endpoint (portal-side) | `POST /api/launch/option-strategy` | `POST /api/launch/swingtrade` |
+| Portal secret env var | `OPTION_STRATEGY_TOKEN_SECRET` | `SWINGTRADE_TOKEN_SECRET` |
+| Sub-portal secret env var | `PREMIUM_TOKEN_SECRET` | `PREMIUM_TOKEN_SECRET` |
+| Portal launch endpoint | `POST /api/launch/option-strategy` | `POST /api/launch/swingtrade` |
+| Auth module file | `server/auth.ts` | `server/auth.js` |
+| Frontend API file | `src/api.ts` | `client/src/api.ts` |
 
-> **Current business policy:** All `basic` members receive promotional access to premium services. To restrict access later, remove `'basic'` from `ALLOWED_TIERS`.
+> **Current business policy:** Both services are **premium services** that nominally belong to `stocks_and_options`. However, all `basic` members currently receive promotional access. To restrict later, change `ALLOWED_TIERS` to `['stocks_and_options']` — one-line change, no DB migration.
 
 ---
 
-## 3. Subscription Tiers (Canonical)
+## 3. Subscription Tiers
 
-Only two tier values exist across all CycleScope services:
+Only two canonical tier values exist across all CycleScope services:
 
-| Tier | Description |
-|------|-------------|
-| `'basic'` | Default tier for all portal users |
-| `'stocks_and_options'` | Premium tier from Patreon subscription |
+| Internal Key | Tier Name | Nominal Access |
+|-------------|-----------|----------------|
+| `'basic'` | Basic | Portal only |
+| `'stocks_and_options'` | Stocks + Options | Portal + SwingTrade + OptionStrategy |
 
-**There is no `'free'`, `'premium'`, or `'stocks'` tier.** These were deprecated per the unified strategy.
+**There is no `'free'`, `'premium'`, or `'stocks'` tier.** Use these exact string values verbatim.
 
-Patreon tier mapping (portal-side only):
+```typescript
+type SubscriptionTier = 'basic' | 'stocks_and_options';
+```
+
+Patreon tier mapping (portal-side only — sub-portals never do this):
 - `'Basic'` / `'Basic Tier'` → `'basic'`
 - `'Premium'` / `'Premium Tier'` / `'Stocks + Options'` → `'stocks_and_options'`
 - Unmapped / null → `'basic'` (default)
@@ -89,10 +96,10 @@ npm install jose cookie-parser
 npm install -D @types/cookie-parser
 ```
 
-| Package | Purpose |
-|---------|---------|
-| `jose` | JWT signing and verification (HS256) |
-| `cookie-parser` | Parse cookies from incoming requests (`req.cookies`) |
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `jose` | `^5.2.0` | JWT signing and verification (HS256) |
+| `cookie-parser` | `^1.4.6` | Parse cookies from incoming requests (`req.cookies`) |
 
 ---
 
@@ -102,15 +109,15 @@ npm install -D @types/cookie-parser
 
 ```env
 # Shared secret with Member Portal
-# Must match portal's OPTION_STRATEGY_TOKEN_SECRET (or SWINGTRADE_TOKEN_SECRET)
-PREMIUM_TOKEN_SECRET=<per-service-secret>
+# MUST match portal's OPTION_STRATEGY_TOKEN_SECRET
+PREMIUM_TOKEN_SECRET=<same-value-as-portals-OPTION_STRATEGY_TOKEN_SECRET>
+
+# Local session signing key — unique to OptionStrategy, never shared
+# Generate with: openssl rand -base64 32
+JWT_SECRET=<unique-random-secret>
 
 # Member Portal URL — used for CORS origin and unauthenticated redirects
 MEMBER_PORTAL_URL=https://portal.cyclescope.com
-
-# Local session signing key — unique to this sub-portal, never shared
-# Generate with: openssl rand -base64 32
-JWT_SECRET=<unique-random-secret>
 ```
 
 ### Frontend (.env)
@@ -120,19 +127,28 @@ JWT_SECRET=<unique-random-secret>
 VITE_MEMBER_PORTAL_URL=https://portal.cyclescope.com
 ```
 
+### Cross-Reference (from golden truth Section 3)
+
+| Variable | Portal | This Service (OptionStrategy) | SwingTrade |
+|----------|--------|-------------------------------|------------|
+| `JWT_SECRET` | unique | unique | unique |
+| `OPTION_STRATEGY_TOKEN_SECRET` | yes | — | — |
+| `PREMIUM_TOKEN_SECRET` | — | yes (= portal's `OPTION_STRATEGY_TOKEN_SECRET`) | yes (= portal's `SWINGTRADE_TOKEN_SECRET`) |
+| `MEMBER_PORTAL_URL` | — | yes | yes |
+
 **Critical rules:**
+- `PREMIUM_TOKEN_SECRET` and `JWT_SECRET` MUST be different values — compromise of the shared handoff secret should not compromise local sessions
 - Each sub-portal's `PREMIUM_TOKEN_SECRET` matches a **different** portal secret (per-service isolation)
-- Each sub-portal has its own unique `JWT_SECRET` — never shared between services
-- Compromising one service's secret does not affect others
+- Compromising one service's secret does not affect the other
 
 ### Startup Validation
 
 Services MUST fail fast if required auth vars are missing:
 
 ```typescript
-const REQUIRED_AUTH_VARS = ['PREMIUM_TOKEN_SECRET', 'JWT_SECRET', 'MEMBER_PORTAL_URL'];
+const REQUIRED_ENV_VARS = ['PREMIUM_TOKEN_SECRET', 'JWT_SECRET', 'MEMBER_PORTAL_URL'];
 
-for (const varName of REQUIRED_AUTH_VARS) {
+for (const varName of REQUIRED_ENV_VARS) {
   if (!process.env[varName]) {
     throw new Error(`Missing required environment variable: ${varName}`);
   }
@@ -143,45 +159,45 @@ for (const varName of REQUIRED_AUTH_VARS) {
 
 ## 6. JWT Specifications
 
-### 6.1 Handoff Token (Portal → Sub-Portal)
+### 6.1 Handoff Token (Portal → OptionStrategy)
 
-Issued by the Member Portal, verified by the sub-portal.
+Issued by the Member Portal, verified by this service.
 
 | Property | Value |
 |----------|-------|
 | Algorithm | HS256 |
 | Library | `jose` |
-| Secret | Per-service (`OPTION_STRATEGY_TOKEN_SECRET` or `SWINGTRADE_TOKEN_SECRET`) |
+| Secret | Portal's `OPTION_STRATEGY_TOKEN_SECRET` (verified with our `PREMIUM_TOKEN_SECRET`) |
 | Expiration | 5 minutes |
 
-**Canonical payload:**
+**Canonical payload (from golden truth Section 5.2):**
 
 ```json
 {
-  "sub": "<userId>",
+  "sub": "<userId as string>",
   "email": "<user email>",
   "tier": "basic | stocks_and_options",
-  "service": "option_strategy | swingtrade",
+  "service": "option_strategy",
   "iat": 1234567890,
   "exp": 1234568190
 }
 ```
 
-> **Important:** The `sub` claim MUST be set via `.setSubject()` — NOT as a payload field.
-> Do NOT expect `userId` or `patreonId` — use `payload.sub` for user identification.
+> **Important:** `sub` is set via `.setSubject()` on the portal side — NOT as a payload field.
+> Do NOT expect `userId` or `patreonId` — always use `payload.sub`.
 
-### 6.2 Local Session Token (Sub-Portal)
+### 6.2 Local Session Token (OptionStrategy)
 
-Created by the sub-portal after successful handoff, stored as httpOnly cookie.
+Created after successful handoff, stored as httpOnly cookie.
 
 | Property | Value |
 |----------|-------|
 | Algorithm | HS256 |
 | Library | `jose` |
-| Secret | Sub-portal's own `JWT_SECRET` |
+| Secret | This service's own `JWT_SECRET` |
 | Expiration | 7 days |
 
-**Canonical payload:**
+**Canonical payload (from golden truth Section 5.3):**
 
 ```json
 {
@@ -199,65 +215,72 @@ Created by the sub-portal after successful handoff, stored as httpOnly cookie.
 
 ## 7. Cookie Specifications
 
+From golden truth Section 6:
+
 | Property | Value |
 |----------|-------|
-| Name | `option_strategy_session` or `swingtrade_session` |
+| Name | `option_strategy_session` |
 | `httpOnly` | `true` (prevents XSS JavaScript access) |
-| `secure` | `true` in production (HTTPS only) |
+| `secure` | `process.env.NODE_ENV === 'production'` |
 | `sameSite` | `'lax'` (CSRF protection) |
 | `path` | `'/'` |
-| `maxAge` | 7 days (in milliseconds: `604800000`) |
+| `maxAge` | `7 * 24 * 60 * 60 * 1000` (7 days in ms) |
 
-> **Railway note:** Behind Railway proxy, the `secure` flag may need to check `X-Forwarded-Proto` header instead of just `NODE_ENV`.
+> **Railway note:** Behind Railway proxy, the `secure` flag may need to check `X-Forwarded-Proto` header. The portal has a utility for this at `server/_core/cookies.ts`.
 
 ---
 
 ## 8. Implementation
 
-### 8.1 Token Exchange Endpoint
+### 8.1 Auth Module (`server/auth.ts`)
 
-**Route:** `GET /auth/handoff?token=xxx`
+This is the canonical implementation from golden truth Section 8, with OptionStrategy constants.
 
 ```typescript
-import * as jose from 'jose';
+// server/auth.ts
+import { jwtVerify, SignJWT } from 'jose';
+import { Request, Response, NextFunction } from 'express';
 
-// Service-specific constants
-const SERVICE_ID = 'option_strategy';  // SwingTrade: 'swingtrade'
-const SESSION_COOKIE_NAME = 'option_strategy_session';  // SwingTrade: 'swingtrade_session'
-const ALLOWED_TIERS = ['basic', 'stocks_and_options'];
-const SESSION_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
+// ── Service-specific constants ──
+export const SESSION_COOKIE_NAME = 'option_strategy_session';
+const SERVICE_ID = 'option_strategy';
 
-app.get('/auth/handoff', async (req, res) => {
+// Premium service — nominally stocks_and_options only.
+// Currently all tiers get access (business decision). To restrict: ['stocks_and_options']
+const ALLOWED_TIERS: string[] = ['basic', 'stocks_and_options'];
+
+// ── Handoff Endpoint ──
+export async function handleAuthHandoff(req: Request, res: Response) {
   const { token } = req.query;
-  const portalUrl = process.env.MEMBER_PORTAL_URL!;
 
   if (!token || typeof token !== 'string') {
-    return res.redirect(`${portalUrl}?error=missing_token`);
+    return res.redirect(`${process.env.MEMBER_PORTAL_URL}?error=missing_token`);
   }
 
   try {
-    // 1. Verify handoff token using shared per-service secret
-    const handoffSecret = new TextEncoder().encode(process.env.PREMIUM_TOKEN_SECRET);
-    const { payload } = await jose.jwtVerify(token, handoffSecret);
+    // 1. Verify handoff token from Member Portal
+    const premiumSecret = new TextEncoder().encode(process.env.PREMIUM_TOKEN_SECRET);
+    const { payload } = await jwtVerify(token, premiumSecret);
 
-    // 2. Validate service claim matches THIS service
-    if (payload.service !== SERVICE_ID) {
-      return res.redirect(`${portalUrl}?error=invalid_service`);
+    // 2. Validate the token is intended for this service (if claim present)
+    if (payload.service && payload.service !== SERVICE_ID) {
+      console.error(`[Auth] Token service mismatch: expected ${SERVICE_ID}, got ${payload.service}`);
+      return res.redirect(`${process.env.MEMBER_PORTAL_URL}?error=invalid_service`);
     }
 
-    // 3. Check tier authorization (defense in depth)
+    // 3. Check tier authorization
     if (!ALLOWED_TIERS.includes(payload.tier as string)) {
-      return res.redirect(`${portalUrl}?error=upgrade_required`);
+      return res.redirect(`${process.env.MEMBER_PORTAL_URL}?error=upgrade_required`);
     }
 
-    // 4. Create local session token using sub-portal's own secret
+    // 4. Create local session token
     const sessionSecret = new TextEncoder().encode(process.env.JWT_SECRET);
-    const sessionToken = await new jose.SignJWT({
+    const sessionToken = await new SignJWT({
       email: payload.email as string,
       tier: payload.tier as string,
     })
       .setProtectedHeader({ alg: 'HS256' })
-      .setSubject(payload.sub!)  // user ID via .setSubject()
+      .setSubject(payload.sub as string)
       .setIssuedAt()
       .setExpirationTime('7d')
       .sign(sessionSecret);
@@ -268,41 +291,20 @@ app.get('/auth/handoff', async (req, res) => {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/',
-      maxAge: SESSION_MAX_AGE,
+      maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
     // 6. Redirect to app root
     return res.redirect('/');
-  } catch (err) {
-    return res.redirect(`${portalUrl}?error=invalid_token`);
-  }
-});
-```
 
-### 8.2 Auth Middleware
-
-**Applies to:** All `/api/*` routes **except** `/api/health`
-
-```typescript
-import { Request, Response, NextFunction } from 'express';
-import * as jose from 'jose';
-
-interface AuthPayload {
-  sub: string;
-  email: string;
-  tier: string;
-}
-
-// Extend Express Request
-declare global {
-  namespace Express {
-    interface Request {
-      user?: AuthPayload;
-    }
+  } catch (error) {
+    console.error('[Auth] Token verification failed:', error);
+    return res.redirect(`${process.env.MEMBER_PORTAL_URL}?error=invalid_token`);
   }
 }
 
-async function requireAuth(req: Request, res: Response, next: NextFunction) {
+// ── Auth Middleware ──
+export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const token = req.cookies?.[SESSION_COOKIE_NAME];
 
   if (!token) {
@@ -311,52 +313,39 @@ async function requireAuth(req: Request, res: Response, next: NextFunction) {
 
   try {
     const secret = new TextEncoder().encode(process.env.JWT_SECRET);
-    const { payload } = await jose.jwtVerify(token, secret);
-
-    req.user = {
-      sub: payload.sub!,
-      email: payload.email as string,
-      tier: payload.tier as string,
-    };
-
+    const { payload } = await jwtVerify(token, secret);
+    (req as any).user = payload;  // { sub, email, tier, iat, exp }
     next();
   } catch {
     return res.status(401).json({ error: 'session_expired' });
   }
 }
-
-// Apply to all /api/* except /api/health
-app.use('/api', (req: Request, res: Response, next: NextFunction) => {
-  if (req.path === '/health') return next();
-  return requireAuth(req, res, next);
-});
 ```
 
-> **Error responses use lowercase snake_case:** `unauthorized`, `session_expired` — NOT title case.
+**Key alignment points with golden truth:**
+- Service claim check uses `payload.service && payload.service !== SERVICE_ID` (tolerates missing claim)
+- `(req as any).user = payload` matches golden truth Section 8.2 exactly
+- Error logging with `[Auth]` prefix matches golden truth
+- Error responses use lowercase snake_case: `unauthorized`, `session_expired`
 
-### 8.3 CORS Configuration
+### 8.2 Server Setup (`server/index.ts`)
 
-Replace open CORS with restricted origin:
-
-```typescript
-import cors from 'cors';
-
-app.use(cors({
-  origin: process.env.MEMBER_PORTAL_URL,
-  credentials: true,  // required for cross-origin cookies
-}));
-```
-
-> **Security note:** CORS only restricts browsers. The `requireAuth` middleware is the real security layer.
-
-### 8.4 Server Setup Order
-
-The middleware order in the Express app matters:
+The middleware order matters. Changes to the existing `server/index.ts`:
 
 ```typescript
 import cookieParser from 'cookie-parser';
+import cors from 'cors';
+import { handleAuthHandoff, requireAuth } from './auth';
 
-// 1. CORS (must be first)
+// ── Env var validation (before anything else) ──
+const REQUIRED_ENV_VARS = ['PREMIUM_TOKEN_SECRET', 'JWT_SECRET', 'MEMBER_PORTAL_URL'];
+for (const varName of REQUIRED_ENV_VARS) {
+  if (!process.env[varName]) {
+    throw new Error(`Missing required environment variable: ${varName}`);
+  }
+}
+
+// 1. CORS — restricted to portal origin (replaces open cors())
 app.use(cors({
   origin: process.env.MEMBER_PORTAL_URL,
   credentials: true,
@@ -369,7 +358,7 @@ app.use(cookieParser());
 app.use(express.json());
 
 // 4. Auth handoff endpoint (no auth required)
-app.get('/auth/handoff', async (req, res) => { /* ... */ });
+app.get('/auth/handoff', handleAuthHandoff);
 
 // 5. Health check (no auth required)
 app.get('/api/health', (_req, res) => {
@@ -382,22 +371,27 @@ app.use('/api', (req, res, next) => {
   return requireAuth(req, res, next);
 });
 
-// 7. API routes (all protected)
+// 7. Protected API routes
 app.use('/api/option-scans', optionScansRoutes);
 app.use('/api/option-portfolios', optionPortfoliosRoutes);
 app.use('/api/option-automation', optionAutomationRoutes);
 ```
 
-### 8.5 Frontend 401 Handling
+> **Note on CORS:** CORS only restricts browsers. The `requireAuth` middleware is the real security layer.
 
-Update the centralized API client to handle expired sessions:
+### 8.3 Frontend 401 Handling (`src/api.ts`)
+
+Update the existing `fetchJSON` wrapper. From golden truth Section 11, adapted to OptionStrategy's existing `api.ts` pattern:
 
 ```typescript
 const MEMBER_PORTAL_URL = import.meta.env.VITE_MEMBER_PORTAL_URL
   || 'https://portal.cyclescope.com';
 
+const BASE = '/api';
+
 async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
+  const res = await fetch(`${BASE}${url}`, {
+    headers: { 'Content-Type': 'application/json' },
     ...options,
     credentials: 'include',  // MUST include cookies
   });
@@ -416,16 +410,30 @@ async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
 }
 ```
 
-**Key changes from existing `api.ts`:**
+**Changes from current `src/api.ts`:**
 1. Add `credentials: 'include'` to all fetch calls
 2. Check for `401` before the generic `!res.ok` check
 3. Redirect to Member Portal on 401
+4. Add `VITE_MEMBER_PORTAL_URL` env var
+
+> **Note:** The golden truth (Section 11) uses `apiFetch()` returning raw `Response`. OptionStrategy already has `fetchJSON<T>()` returning parsed JSON. We keep `fetchJSON` to match existing call sites, but add the auth behavior. SwingTrade should use the same pattern adapted to their `client/src/api.ts`.
+
+### 8.4 Cron Jobs
+
+Both OptionStrategy and SwingTrade have server-side cron jobs (via `node-cron`) that call internal `localhost` endpoints for scans and price updates. These are **server-to-server calls within the same process** — they do NOT go through the browser and are NOT subject to CORS or cookie auth.
+
+**Current approach (both projects):** Cron handlers call internal functions directly or hit `localhost` endpoints. Since `requireAuth` only applies to `/api/*` routes and cron calls originate from the server process itself, they bypass auth naturally.
+
+**If cron jobs call `localhost/api/*` via HTTP:** They will hit the auth middleware and fail. Options:
+1. **(Recommended)** Refactor cron to call service functions directly instead of HTTP endpoints
+2. Add a health-check-style exclusion for cron-triggered paths
+3. Use a server-side auth bypass token (adds complexity)
 
 ---
 
 ## 9. Error Handling
 
-### Sub-Portal API Errors
+### Sub-Portal API Errors (from golden truth Section 14.1)
 
 ```typescript
 // Missing session cookie
@@ -435,13 +443,11 @@ res.status(401).json({ error: 'unauthorized' });
 res.status(401).json({ error: 'session_expired' });
 ```
 
-### Auth Redirect Error Parameters
+### Auth Redirect Error Parameters (from golden truth Section 14.3)
 
-When redirecting back to Member Portal, append error context:
-
-| Redirect Parameter | Meaning |
-|-------------------|---------|
-| `?error=missing_token` | No token in handoff request |
+| Query Parameter | Meaning |
+|----------------|---------|
+| `?error=missing_token` | No token provided in handoff request |
 | `?error=invalid_token` | Token verification failed (expired, bad signature) |
 | `?error=invalid_service` | Token's `service` claim doesn't match this sub-portal |
 | `?error=upgrade_required` | User's tier not in `ALLOWED_TIERS` |
@@ -450,27 +456,30 @@ When redirecting back to Member Portal, append error context:
 
 ## 10. What Sub-Portals Do NOT Implement
 
+From golden truth Section 1 & 8, and cross-project analysis:
+
 | Feature | Reason |
 |---------|--------|
-| `user_id` columns in database | Data is shared across all users, not per-user |
+| `user_id` columns in database | Data is shared across all premium users, not per-user |
 | Login form / signup page | All auth UI lives in the Member Portal |
 | Password hashing (bcrypt) | Sub-portals never see passwords |
 | Patreon OAuth / webhooks | Handled entirely by the Member Portal |
 | Admin roles / RBAC | No admin features in sub-portals |
-| Per-user cron job scoping | Scans and P&L updates are global system operations |
-| Per-user portfolios | Portfolios are system-generated from market scans |
-| Token refresh endpoint | User re-authenticates via Member Portal after session expires |
+| Per-user scans or portfolios | Portfolios and scans are system-generated, globally shared |
+| Token refresh endpoint | User re-authenticates via Member Portal after 7-day session expires |
 | Patreon tier sync | Portal syncs tiers daily; sub-portals read tier from JWT |
 
 ---
 
 ## 11. Security Summary
 
+From golden truth Section 12, scoped to sub-portal responsibilities:
+
 | Measure | Purpose |
 |---------|---------|
 | Per-service handoff secrets | Compromise isolation — one leaked secret doesn't expose other services |
 | 5-minute handoff JWT | Short-lived, limits interception window |
-| `service` claim validation | Rejects tokens meant for other sub-portals |
+| `service` claim validation | Rejects tokens meant for other sub-portals (if claim present) |
 | Tier embedded in JWT | Authorization without DB call |
 | `requireAuth` middleware | Blocks unauthenticated API access |
 | 7-day local session cookie | Persistent login within sub-portal |
@@ -486,106 +495,105 @@ When redirecting back to Member Portal, append error context:
 
 ## 12. Tier Propagation & Revocation
 
-When a user downgrades on Patreon:
-1. Portal's daily sync updates the user's tier
+From golden truth Section 10 (propagation delay note):
+
+1. Portal's daily sync (+ webhooks) updates the user's tier
 2. The user's existing sub-portal session cookie remains valid (up to 7 days)
-3. On next portal re-auth, the new lower tier is embedded in the handoff token
-4. Sub-portal creates a new session with the lower tier
+3. On next portal re-auth, the new tier is embedded in the handoff token
+4. Sub-portal creates a new session with the updated tier
 
 **Optional future enhancement:** Sub-portals could expose a `POST /api/revoke` endpoint callable by the portal for immediate session invalidation.
 
 ---
 
-## 13. Implementation Phases
+## 13. Implementation Phases (OptionStrategy-specific)
 
 ### Phase 1: Dependencies & Config
-- [ ] Install `jose`, `cookie-parser`, `@types/cookie-parser`
+- [ ] `npm install jose cookie-parser && npm install -D @types/cookie-parser`
 - [ ] Add `PREMIUM_TOKEN_SECRET`, `JWT_SECRET`, `MEMBER_PORTAL_URL` to `.env`
 - [ ] Add `VITE_MEMBER_PORTAL_URL` to frontend `.env`
-- [ ] Update `.env.example` with new variables
-- [ ] Add startup env var validation
+- [ ] Update `.env.example` with new variables (no actual secrets)
+- [ ] Add startup env var validation to `server/index.ts`
 
 ### Phase 2: Backend Auth
-- [ ] Add `cookie-parser` middleware
-- [ ] Implement `GET /auth/handoff?token=xxx` endpoint
-- [ ] Implement `requireAuth` middleware
-- [ ] Apply middleware to `/api/*` (excluding `/api/health`)
-- [ ] Restrict CORS to `MEMBER_PORTAL_URL` with `credentials: true`
+- [ ] Create `server/auth.ts` with `handleAuthHandoff()` and `requireAuth()` (Section 8.1)
+- [ ] Add `cookie-parser` middleware to `server/index.ts`
+- [ ] Mount `GET /auth/handoff` route (before auth middleware)
+- [ ] Apply `requireAuth` middleware to `/api/*` (excluding `/api/health`)
+- [ ] Replace `app.use(cors())` with restricted CORS (Section 8.2)
+- [ ] Verify cron jobs still work after auth is added (Section 8.4)
 
 ### Phase 3: Frontend Auth
-- [ ] Add `credentials: 'include'` to centralized fetch
+- [ ] Add `credentials: 'include'` to `fetchJSON` in `src/api.ts`
 - [ ] Add 401 detection → redirect to `MEMBER_PORTAL_URL`
 - [ ] Wire `VITE_MEMBER_PORTAL_URL` env var
 
 ### Phase 4: Validation
-- [ ] Test: unauthenticated API calls return `401 { error: 'unauthorized' }`
-- [ ] Test: `GET /auth/handoff?token=valid` sets cookie and redirects to `/`
-- [ ] Test: `GET /auth/handoff?token=expired` redirects to portal with `?error=invalid_token`
-- [ ] Test: `GET /auth/handoff?token=wrong_service` redirects with `?error=invalid_service`
-- [ ] Test: authenticated API calls work normally with session cookie
-- [ ] Test: `/api/health` returns 200 without authentication
-- [ ] Test: cron jobs (scans, P&L updates) still work (server-side, not HTTP)
+- [ ] Unauthenticated API calls return `401 { error: 'unauthorized' }`
+- [ ] `GET /auth/handoff?token=valid` sets cookie and redirects to `/`
+- [ ] `GET /auth/handoff?token=expired` redirects to portal with `?error=invalid_token`
+- [ ] `GET /auth/handoff?token=wrong_service` redirects with `?error=invalid_service`
+- [ ] Authenticated API calls work normally with session cookie
+- [ ] `/api/health` returns 200 without authentication
+- [ ] Cron jobs (scans, P&L updates) still run correctly
 
 ---
 
 ## 14. Staging & Deployment
 
+From golden truth Section 17:
+
 ### Branch Strategy
 
 ```
-feature/premium-auth → staging → Test → main → Production
+feature/premium-auth → staging branch → Staging deploys → Test → main branch → Production
 ```
 
-### Staging Environment
-
-Each sub-portal has a staging project on Railway:
+### Staging Environment (Railway)
 
 ```
 PRODUCTION                          STAGING
 cyclescope-option-strategy          cyclescope-option-strategy-staging
-  (main branch)                       (staging branch)
-cyclescope-swingtrade               cyclescope-swingtrade-staging
-  (main branch)                       (staging branch)
+  (deploys from: main)                (deploys from: staging)
 ```
 
-### Staging Env Vars
-
-Staging uses separate secrets and URLs:
-- `PREMIUM_TOKEN_SECRET` → staging-specific value (matches staging portal)
-- `JWT_SECRET` → unique staging value
-- `MEMBER_PORTAL_URL` → staging portal URL
-- `VITE_MEMBER_PORTAL_URL` → staging portal URL
+Staging uses separate secrets and URLs — never share production secrets with staging.
 
 ---
 
-## 15. Discrepancies Resolved
+## 15. Current Codebase Status
 
-This document resolves the following discrepancies identified in the [cross-project analysis](https://github.com/schiang418/cyclescope-doc/blob/main/docs/CROSS_PROJECT_DISCREPANCIES.md):
+**As of 2026-02-20, NO auth code exists yet.** This is the baseline:
 
-| # | Discrepancy | Resolution in This Doc |
-|---|---|---|
-| #1 | Tier values mismatch | Canonical: `'basic'`, `'stocks_and_options'` only (Section 3) |
-| #2 | Token secret strategy | Per-service secrets via `PREMIUM_TOKEN_SECRET` (Section 5) |
-| #6 | Handoff token claims | Canonical: `sub`, `email`, `tier`, `service` (Section 6.1) |
-| #7 | Session token claims | Canonical: `sub`, `email`, `tier` via `.setSubject()` (Section 6.2) |
-| #10 | Error response casing | Lowercase snake_case: `unauthorized`, `session_expired` (Section 9) |
-| #14 | Service identifier values | `'option_strategy'` and `'swingtrade'` (Section 2) |
-| #15 | Tier check on handoff | `ALLOWED_TIERS` validation in handoff endpoint (Section 8.1, step 3) |
+| Component | Current State | Action Needed |
+|-----------|--------------|---------------|
+| `server/index.ts` | `app.use(cors())` — open CORS, no cookie parser, no auth | Restructure per Section 8.2 |
+| `server/auth.ts` | Does not exist | Create per Section 8.1 |
+| `src/api.ts` | `fetchJSON` — no `credentials: 'include'`, no 401 handling | Update per Section 8.3 |
+| `package.json` | Has `cors`, missing `jose` and `cookie-parser` | Install per Section 4 |
+| `.env.example` | No auth variables | Add per Section 5 |
+| API routes | All unauthenticated | Protected by middleware after Phase 2 |
+| Database | No user/auth tables (not needed — sub-portals don't store user data) | No changes needed |
+| Cron jobs (`server/cron.ts`) | Call internal endpoints via localhost | Verify still works after auth (Section 8.4) |
 
 ---
 
 ## Supersedes
 
-This document supersedes the previous `SUB_PORTAL_AUTH_INTEGRATION.md`. Key changes from the prior version:
+This document replaces the previous `SUB_PORTAL_AUTH_INTEGRATION.md`. Key corrections:
 
-| Previous | Updated |
-|----------|---------|
+| Previous Doc | This Doc (aligned with golden truth) |
+|-------------|--------------------------------------|
 | `GET /auth?token=xxx` | `GET /auth/handoff?token=xxx` |
 | Single shared `PREMIUM_TOKEN_SECRET` | Per-service secrets (blast radius isolation) |
 | `userId` in JWT payload | `sub` via `.setSubject()` |
-| No `service` claim validation | `service` claim MUST match `SERVICE_ID` |
+| No `service` claim validation | Validate if `service` claim present |
+| Strict `service !== SERVICE_ID` | `payload.service && payload.service !== SERVICE_ID` (tolerant) |
 | No tier check on handoff | `ALLOWED_TIERS` check required |
-| Title case errors (`Unauthorized`) | snake_case errors (`unauthorized`) |
+| Title case errors | Lowercase snake_case: `unauthorized`, `session_expired` |
+| No error logging | `console.error('[Auth] ...')` on failures |
+| `req.user` via global type augmentation | `(req as any).user = payload` per golden truth |
 | No `VITE_MEMBER_PORTAL_URL` | Required for frontend 401 redirect |
 | No env var startup validation | Fail-fast validation required |
-| No redirect error parameters | Error context appended as query params |
+| No cron job guidance | Section 8.4 addresses cron/auth interaction |
+| No codebase status section | Section 15 documents current state |

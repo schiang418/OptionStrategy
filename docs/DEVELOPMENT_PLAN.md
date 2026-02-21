@@ -27,7 +27,7 @@ Automated option income strategy tracking app. Scrapes Option Samurai for credit
 | Phase 3: API Layer | COMPLETE | All 14 endpoints |
 | Phase 4: Frontend | COMPLETE | All views, charts, dark theme |
 | Phase 5: Cron & Automation | COMPLETE | Monday scan, daily P&L, holidays |
-| Phase 6: Authentication | NOT STARTED | Portal handoff, JWT sessions |
+| Phase 6: Authentication | COMPLETE | Portal handoff, JWT sessions, cron refactored |
 | Phase 7: Staging Environment | NOT STARTED | Railway staging service |
 | Phase 8: Testing & Hardening | NOT STARTED | Unit tests, integration tests |
 | Phase 9: Production Deploy | NOT STARTED | Final deployment + monitoring |
@@ -175,32 +175,33 @@ Automated option income strategy tracking app. Scrapes Option Samurai for credit
 
 ---
 
-## Phase 6: Authentication — NOT STARTED
+## Phase 6: Authentication — COMPLETE
 
 > **Reference:** [SUB_PORTAL_AUTH_IMPLEMENTATION.md](./SUB_PORTAL_AUTH_IMPLEMENTATION.md)
 > **Golden truth:** [UNIFIED_AUTH_STRATEGY.md](https://github.com/schiang418/cyclescope-doc/blob/main/docs/UNIFIED_AUTH_STRATEGY.md)
 
 ### 6.1 Dependencies & Config
-- [ ] Install `jose` and `cookie-parser` (+ `@types/cookie-parser`)
-- [ ] Add env vars: `PREMIUM_TOKEN_SECRET`, `JWT_SECRET`, `MEMBER_PORTAL_URL`
-- [ ] Add frontend env var: `VITE_MEMBER_PORTAL_URL`
-- [ ] Update `.env.example` with auth variables
-- [ ] Add startup env var validation (fail-fast if missing)
+- [x] Install `jose` and `cookie-parser` (+ `@types/cookie-parser`)
+- [x] Add env vars: `PREMIUM_TOKEN_SECRET`, `JWT_SECRET`, `MEMBER_PORTAL_URL`
+- [x] Add frontend env var: `VITE_MEMBER_PORTAL_URL`
+- [x] Update `.env.example` with auth variables
+- [x] Add startup env var validation (fail-fast in production, warn in dev)
 
 ### 6.2 Backend Auth
-- [ ] Create `server/auth.ts` with `handleAuthCallback()` and `requireAuth()`
-- [ ] Add `cookie-parser` middleware to `server/index.ts`
-- [ ] Mount `GET /auth/handoff` route (before auth middleware)
-- [ ] Apply `requireAuth` middleware to `/api/*` (excluding `/api/health`)
-- [ ] Replace open `cors()` with restricted CORS (portal origin only)
-- [ ] Resolve cron job auth conflict — refactor to call service functions directly instead of HTTP endpoints
+- [x] Create `server/auth.ts` with `handleAuthCallback()` and `requireAuth()`
+- [x] Add `cookie-parser` middleware to `server/index.ts`
+- [x] Mount `GET /auth/handoff` route (before auth middleware)
+- [x] Apply `requireAuth` middleware to `/api/*` (excluding `/api/health`)
+- [x] Replace open `cors()` with restricted CORS (portal origin when auth enabled)
+- [x] Resolve cron job auth conflict — refactored to call service functions directly (no HTTP)
 
 ### 6.3 Frontend Auth
-- [ ] Add `credentials: 'include'` to `fetchJSON` in `src/api.ts`
-- [ ] Add 401 detection → redirect to Member Portal
-- [ ] Wire `VITE_MEMBER_PORTAL_URL` env var
+- [x] Add `credentials: 'include'` to `fetchJSON` in `src/api.ts`
+- [x] Add 401 detection → redirect to Member Portal
+- [x] Wire `VITE_MEMBER_PORTAL_URL` env var
+- [x] Add `src/vite-env.d.ts` for Vite type support
 
-### 6.4 Validation
+### 6.4 Validation (to test on staging)
 - [ ] Unauthenticated API calls return `401 { error: 'unauthorized' }`
 - [ ] `GET /auth/handoff?token=valid` sets cookie and redirects to `/`
 - [ ] `GET /auth/handoff?token=expired` redirects to portal with `?error=invalid_token`
@@ -208,6 +209,12 @@ Automated option income strategy tracking app. Scrapes Option Samurai for credit
 - [ ] Authenticated API calls work normally with session cookie
 - [ ] `/api/health` returns 200 without authentication
 - [ ] Cron jobs still run correctly after auth is added
+
+### 6.5 Implementation Notes
+- Auth is **optional in development** (all env vars must be set to enable) — allows running locally without portal
+- Auth is **required in production** — server fails to start if auth env vars are missing
+- Cron jobs call service functions directly (`saveScanResults`, `createPortfoliosFromScan`, `updateAllPortfolioPnl`) — completely bypasses HTTP/auth layer
+- CORS is restricted to portal origin only when auth is enabled; open in dev mode
 
 ---
 
@@ -305,11 +312,21 @@ feature branches → staging branch → staging deploy → test → main → pro
   - Cron: `server/cron.ts`
   - Frontend: `src/App.tsx`, `src/api.ts`, `src/*.tsx`
 
+### 2026-02-21 — Phase 6: Authentication Implemented
+- **Installed** `jose` + `cookie-parser` dependencies
+- **Created** `server/auth.ts` — `handleAuthCallback()` (portal JWT handoff) + `requireAuth()` (session middleware)
+- **Updated** `server/index.ts` — cookie-parser, restricted CORS, auth handoff route, auth middleware on `/api/*`
+- **Refactored** `server/cron.ts` — removed `localPost()` HTTP calls, now calls service functions directly (scraper, portfolio, P&L)
+- **Updated** `src/api.ts` — `credentials: 'include'` + 401 → portal redirect
+- **Added** `src/vite-env.d.ts` for Vite `import.meta.env` type support
+- **Updated** `.env.example` with auth variables
+- **Design decision:** Auth optional in dev (warn only), required in production (fail-fast)
+- TypeScript compilation verified clean (both server and frontend)
+
 ### Next Steps
-1. **Phase 6 (Auth)** — Highest priority. Required before production use.
-2. **Phase 7 (Staging)** — Set up staging environment in Railway for safe testing.
-3. **Phase 8 (Tests)** — Add unit tests for critical math (P&L, conversions) and auth flow.
-4. **Phase 9 (Deploy)** — Production deploy after staging validation.
+1. **Phase 7 (Staging)** — Set up staging environment in Railway for safe testing.
+2. **Phase 8 (Tests)** — Add unit tests for critical math (P&L, conversions) and auth flow.
+3. **Phase 9 (Deploy)** — Production deploy after staging validation.
 
 ---
 

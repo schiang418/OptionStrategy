@@ -226,7 +226,7 @@ export default function App() {
               hover:text-white hover:bg-[#1a1d27] transition-all"
           >
             <ArrowLeft className="w-4 h-4" />
-            Member Portal
+            CycleScope Portal
           </a>
         </div>
       </nav>

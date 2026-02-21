@@ -10,7 +10,7 @@ const SERVICE_ID = 'option_strategy';
 const ALLOWED_TIERS: string[] = ['basic', 'stocks_and_options'];
 
 // ── Handoff Endpoint ──
-export async function handleAuthCallback(req: Request, res: Response) {
+export async function handleAuthHandoff(req: Request, res: Response) {
   const { token } = req.query;
 
   if (!token || typeof token !== 'string') {

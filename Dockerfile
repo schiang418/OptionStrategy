@@ -36,6 +36,9 @@ RUN npx playwright install chromium --with-deps
 # Copy source code
 COPY . .
 
+# Accept build-time env vars so Vite can inline them
+ARG VITE_MEMBER_PORTAL_URL
+
 # Build frontend and server
 RUN npx vite build && npx tsc -p tsconfig.server.json
 

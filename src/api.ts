@@ -1,10 +1,19 @@
 const BASE = '/api';
+const MEMBER_PORTAL_URL = import.meta.env.VITE_MEMBER_PORTAL_URL
+  || 'https://portal.cyclescope.com';
 
 async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${url}`, {
     headers: { 'Content-Type': 'application/json' },
     ...options,
+    credentials: 'include',
   });
+
+  if (res.status === 401) {
+    window.location.href = MEMBER_PORTAL_URL;
+    throw new Error('Session expired');
+  }
+
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`API error ${res.status}: ${text}`);

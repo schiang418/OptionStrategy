@@ -185,14 +185,14 @@ Automated option income strategy tracking app. Scrapes Option Samurai for credit
 - [x] Add env vars: `PREMIUM_TOKEN_SECRET`, `JWT_SECRET`, `MEMBER_PORTAL_URL`
 - [x] Add frontend env var: `VITE_MEMBER_PORTAL_URL`
 - [x] Update `.env.example` with auth variables
-- [x] Add startup env var validation (fail-fast in production, warn in dev)
+- [x] Add startup env var validation (fail-fast always — matches SwingTrade)
 
 ### 6.2 Backend Auth
-- [x] Create `server/auth.ts` with `handleAuthCallback()` and `requireAuth()`
+- [x] Create `server/auth.ts` with `handleAuthHandoff()` and `requireAuth()`
 - [x] Add `cookie-parser` middleware to `server/index.ts`
 - [x] Mount `GET /auth/handoff` route (before auth middleware)
 - [x] Apply `requireAuth` middleware to `/api/*` (excluding `/api/health`)
-- [x] Replace open `cors()` with restricted CORS (portal origin when auth enabled)
+- [x] Replace open `cors()` with restricted CORS (portal origin always)
 - [x] Resolve cron job auth conflict — refactored to call service functions directly (no HTTP)
 
 ### 6.3 Frontend Auth
@@ -211,10 +211,9 @@ Automated option income strategy tracking app. Scrapes Option Samurai for credit
 - [ ] Cron jobs still run correctly after auth is added
 
 ### 6.5 Implementation Notes
-- Auth is **optional in development** (all env vars must be set to enable) — allows running locally without portal
-- Auth is **required in production** — server fails to start if auth env vars are missing
+- Auth is **required always** — server fails to start if `PREMIUM_TOKEN_SECRET`, `JWT_SECRET`, or `MEMBER_PORTAL_URL` are missing (matches SwingTrade behavior)
 - Cron jobs call service functions directly (`saveScanResults`, `createPortfoliosFromScan`, `updateAllPortfolioPnl`) — completely bypasses HTTP/auth layer
-- CORS is restricted to portal origin only when auth is enabled; open in dev mode
+- CORS is always restricted to portal origin (no open CORS in dev)
 
 ---
 
@@ -323,8 +322,15 @@ feature branches → staging branch → staging deploy → test → main → pro
 - **Design decision:** Auth optional in dev (warn only), required in production (fail-fast)
 - TypeScript compilation verified clean (both server and frontend)
 
+### 2026-02-21 — Auth Aligned with SwingTrade
+- **Renamed** `handleAuthCallback()` → `handleAuthHandoff()` to match golden doc terminology
+- **Removed** optional dev mode — server now fails fast if auth env vars are missing in all environments, matching SwingTrade's approach
+- **CORS** always restricted to portal origin (no more open CORS in dev)
+- **Files changed:** `server/auth.ts`, `server/index.ts`
+- **Code pushed to `staging` branch** — ready for Railway staging deployment
+
 ### Next Steps
-1. **Phase 7 (Staging)** — Set up staging environment in Railway for safe testing.
+1. **Phase 7 (Staging)** — Configure Railway staging service, deploy from `staging` branch, validate auth handoff flow.
 2. **Phase 8 (Tests)** — Add unit tests for critical math (P&L, conversions) and auth flow.
 3. **Phase 9 (Deploy)** — Production deploy after staging validation.
 

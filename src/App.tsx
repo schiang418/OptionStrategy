@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { ChevronLeft, ChevronRight, RefreshCw, Loader2, BarChart3, TrendingUp, List, Lock } from 'lucide-react';
+import { ChevronLeft, ChevronRight, RefreshCw, Loader2, BarChart3, TrendingUp, List, Lock, ArrowLeft } from 'lucide-react';
 import {
   fetchScanDates,
   fetchScanResults,
@@ -19,6 +19,10 @@ import ScanResultsPanel from './components/ScanResultsPanel';
 import PortfolioCards from './components/PortfolioCards';
 import PerformanceChart from './components/PerformanceChart';
 import AllTradesTable from './components/AllTradesTable';
+
+const MEMBER_PORTAL_URL = import.meta.env.VITE_MEMBER_PORTAL_URL
+  || 'https://portal.cyclescope.com';
+const MANUAL_TRIGGER = import.meta.env.VITE_MANUAL_TRIGGER === 'true';
 
 type ViewTab = 'overview' | 'trades' | 'comparison';
 
@@ -208,6 +212,25 @@ export default function App() {
   };
 
   return (
+    <div className="min-h-screen">
+      {/* Top Navigation Bar */}
+      <nav className="bg-[#0a0c14] border-b border-[#1a1d27]">
+        <div className="max-w-[1400px] mx-auto px-4 h-14 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-lg font-bold tracking-tight text-white">OptionScope</span>
+            <span className="text-xs text-[#8b8fa3] hidden sm:inline">Option Income Strategy</span>
+          </div>
+          <a
+            href={MEMBER_PORTAL_URL}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm text-[#8b8fa3]
+              hover:text-white hover:bg-[#1a1d27] transition-all"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Member Portal
+          </a>
+        </div>
+      </nav>
+
     <div className="max-w-[1400px] mx-auto px-4 py-6">
       {/* Toast notification */}
       {toast && (
@@ -283,27 +306,31 @@ export default function App() {
 
         <div className="flex-1" />
 
-        {/* Action buttons */}
-        <button
-          onClick={handleUpdatePnl}
-          disabled={pnlLoading || scanLoading}
-          className="flex items-center gap-2 px-4 py-2 bg-[#1a1d27] hover:bg-[#242836]
-            border border-[#2a2e3a] rounded-lg text-sm font-medium transition-all disabled:opacity-50"
-        >
-          {pnlLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-          {pnlLoading ? 'Updating...' : 'Update P&L'}
-        </button>
+        {/* Action buttons (only shown when VITE_MANUAL_TRIGGER=true) */}
+        {MANUAL_TRIGGER && (
+          <>
+            <button
+              onClick={handleUpdatePnl}
+              disabled={pnlLoading || scanLoading}
+              className="flex items-center gap-2 px-4 py-2 bg-[#1a1d27] hover:bg-[#242836]
+                border border-[#2a2e3a] rounded-lg text-sm font-medium transition-all disabled:opacity-50"
+            >
+              {pnlLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+              {pnlLoading ? 'Updating...' : 'Update P&L'}
+            </button>
 
-        <button
-          onClick={handleRunScan}
-          disabled={scanLoading || pnlLoading}
-          className="flex items-center gap-2 px-4 py-2 hover:opacity-90
-            rounded-lg text-sm font-medium text-white transition-all disabled:opacity-50"
-          style={{ background: strategy.color }}
-        >
-          {scanLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <TrendingUp className="w-4 h-4" />}
-          {scanLoading ? 'Scanning...' : 'Run Scan & Build'}
-        </button>
+            <button
+              onClick={handleRunScan}
+              disabled={scanLoading || pnlLoading}
+              className="flex items-center gap-2 px-4 py-2 hover:opacity-90
+                rounded-lg text-sm font-medium text-white transition-all disabled:opacity-50"
+              style={{ background: strategy.color }}
+            >
+              {scanLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <TrendingUp className="w-4 h-4" />}
+              {scanLoading ? 'Scanning...' : 'Run Scan & Build'}
+            </button>
+          </>
+        )}
       </div>
 
       {/* Date Navigation (for overview tab) */}
@@ -381,6 +408,7 @@ export default function App() {
       {activeTab === 'comparison' && (
         <PerformanceChart scanName={strategy.scanName} />
       )}
+    </div>
     </div>
   );
 }
